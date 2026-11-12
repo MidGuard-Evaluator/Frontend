@@ -72,7 +72,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-20 flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
           <div className="text-sm font-medium text-slate-700">
-            {state.assessment.course} · <span className="text-slate-500">{state.assessment.title}</span>
+            {isTeacher && state.assessment.course ? (
+              <>
+                {state.assessment.course} · <span className="text-slate-500">{state.assessment.title}</span>
+              </>
+            ) : (
+              <span className="text-slate-800">{state.assessment.title}</span>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <span className="text-xs text-slate-600">

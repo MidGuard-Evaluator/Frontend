@@ -471,6 +471,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       try {
         const raw = localStorage.getItem(KEY);
         s = raw ? (JSON.parse(raw) as State) : buildSeed();
+        if (s.assessment.course === "CS2042 Operating Systems") {
+          s.assessment.course = "";
+        }
       } catch {
         s = buildSeed();
       }

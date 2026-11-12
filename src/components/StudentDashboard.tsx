@@ -80,17 +80,7 @@ export function StudentDashboard() {
 
   return (
     <div className="space-y-6">
-      <PageHeader
-        title="My Released Results"
-        right={
-          <Link
-            href="/my-script"
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-          >
-            {myScript ? `View uploaded script (${myScript.images.length} pages)` : "Upload handwritten script"}
-          </Link>
-        }
-      />
+      <PageHeader title="My Released Results" />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         <Card className="px-4 py-3.5">
@@ -135,14 +125,6 @@ export function StudentDashboard() {
             <CardHeader
               title="Submitted Script — Awaiting Grade Release"
               sub={`Script ${myScript.pseudonymousCode} · Uploaded ${fmtTime(myScript.uploadedAt)} · Your marks and feedback will appear here once released by the examiner.`}
-              right={
-                <Link
-                  href="/my-script"
-                  className="inline-flex items-center rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                >
-                  Manage script pages
-                </Link>
-              }
             />
             <div className="p-5">
               <div className="grid grid-cols-1 items-stretch gap-5 sm:grid-cols-2 lg:grid-cols-3">

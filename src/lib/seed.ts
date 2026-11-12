@@ -102,9 +102,9 @@ export function buildSeed(): State {
 
   return {
     assessment: {
-      id: "asm-cs2042-mid-2026",
+      id: "asm-mid-2026",
       title: "Mid Semester Examination 2026",
-      course: "CS2042 Operating Systems",
+      course: "",
       retentionDays: 90,
       questions: [
         { id: "q1", number: "Q1", prompt: "Define a process and state two differences between a process and a thread.", maxMarks: 4 },
