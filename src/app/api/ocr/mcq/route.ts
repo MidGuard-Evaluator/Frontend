@@ -30,7 +30,7 @@ export async function POST(req: Request) {
         scriptId: body.scriptId || "SCR-ANON",
         images,
       }),
-      signal: AbortSignal.timeout(20000),
+      signal: AbortSignal.timeout(35000),
     });
 
     if (!backendRes.ok) {

@@ -25,7 +25,7 @@ export async function createMaskedCopy(src: string, rect: Rect): Promise<string>
     (rect.width / 100) * canvas.width,
     (rect.height / 100) * canvas.height,
   );
-  return canvas.toDataURL("image/jpeg", 0.8);
+  return canvas.toDataURL("image/jpeg", 0.95);
 }
 
 /** Converts a ScriptImage into a header-masked base64 JPEG payload safe for external AI provider calls. */
@@ -40,7 +40,7 @@ export async function imageToMaskedBase64(image: ScriptImage): Promise<{ mimeTyp
           canvas.height = img.naturalHeight;
           const ctx = canvas.getContext("2d")!;
           ctx.drawImage(img, 0, 0);
-          return canvas.toDataURL("image/jpeg", 0.85);
+          return canvas.toDataURL("image/jpeg", 0.95);
         })();
 
   const [header, base64Data] = dataUrl.split(",");
