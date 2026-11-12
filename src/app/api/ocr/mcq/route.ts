@@ -46,6 +46,8 @@ export async function POST(req: Request) {
     const backendData = (await backendRes.json()) as {
       ok?: boolean;
       model?: string;
+      optionStyle?: "ALPHA" | "NUMERIC";
+      optionLabels?: string[];
       items?: McqItem[];
       error?: string;
     };
@@ -60,6 +62,8 @@ export async function POST(req: Request) {
     return NextResponse.json({
       ok: true,
       model: backendData.model ?? "backend-m1",
+      optionStyle: backendData.optionStyle,
+      optionLabels: backendData.optionLabels,
       items: backendData.items,
     });
   } catch {

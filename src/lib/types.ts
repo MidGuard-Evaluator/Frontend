@@ -42,9 +42,11 @@ export type BatchStatus = "COMPLETE" | "PARTIAL_FAILURE";
 
 export type PaperType = "STRUCTURED" | "MCQ";
 
+export type McqOptionStyle = "ALPHA" | "NUMERIC";
+
 export type McqItem = {
   questionNumber: number;
-  selectedOption: string; // "A" | "B" | "C" | "D" | "E" | "BLANK" | "MULTIPLE"
+  selectedOption: string; // "A"-"E" | "1"-"5" | "BLANK" | "MULTIPLE"
   confidence: number | "unknown";
   note?: string;
   edited?: boolean;
@@ -53,6 +55,8 @@ export type McqItem = {
 export type McqExtraction = {
   extractedAt: string;
   model: string;
+  optionStyle?: McqOptionStyle;
+  optionLabels?: string[];
   verified: boolean;
   items: McqItem[];
 };

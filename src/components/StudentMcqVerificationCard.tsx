@@ -7,7 +7,8 @@ import { orderedImages } from "@/lib/logic";
 import { useStore } from "@/lib/store";
 import type { McqItem, Script } from "@/lib/types";
 
-const OPTIONS = ["A", "B", "C", "D", "E", "BLANK"] as const;
+const ALPHA_OPTIONS = ["A", "B", "C", "D", "E"] as const;
+const NUMERIC_OPTIONS = ["1", "2", "3", "4", "5"] as const;
 const RANGE_SIZE = 10;
 
 type FilterMode = "ALL" | "NEEDS_REVIEW" | "EDITED";
@@ -34,6 +35,16 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
   const [zoomSheet, setZoomSheet] = useState<boolean>(false);
 
   const items = extraction?.items ?? [];
+
+  const activeOptions = useMemo(() => {
+    if (extraction?.optionLabels && extraction.optionLabels.length >= 2) {
+      return [...extraction.optionLabels, "BLANK"];
+    }
+    const hasNumeric =
+      extraction?.optionStyle === "NUMERIC" ||
+      items.some((i) => ["1", "2", "3", "4", "5"].includes(i.selectedOption));
+    return [...(hasNumeric ? NUMERIC_OPTIONS : ALPHA_OPTIONS), "BLANK"];
+  }, [extraction, items]);
 
   const summary = useMemo(() => {
     const flagged = items.filter(needsReview).length;
@@ -91,6 +102,8 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
       const data = (await res.json()) as {
         ok: boolean;
         model?: string;
+        optionStyle?: "ALPHA" | "NUMERIC";
+        optionLabels?: string[];
         items?: McqItem[];
         error?: string;
       };
@@ -104,6 +117,8 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
       actions.setMcqExtraction(script.id, {
         extractedAt: new Date().toISOString(),
         model: data.model || "ocr-mcq",
+        optionStyle: data.optionStyle,
+        optionLabels: data.optionLabels,
         verified: false,
         items: data.items,
       });
@@ -120,12 +135,13 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
     if (!extraction) return;
     const nextNum =
       extraction.items.length > 0 ? Math.max(...extraction.items.map((i) => i.questionNumber)) + 1 : 1;
+    const defaultOpt = activeOptions[0] ?? "A";
     actions.setMcqExtraction(script.id, {
       ...extraction,
       verified: false,
       items: [
         ...extraction.items,
-        { questionNumber: nextNum, selectedOption: "A", confidence: "unknown", edited: true },
+        { questionNumber: nextNum, selectedOption: defaultOpt, confidence: "unknown", edited: true },
       ],
     });
   }
@@ -137,16 +153,16 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
   ) {
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
       e.preventDefault();
-      const next = OPTIONS[(currentIdx + 1) % OPTIONS.length];
+      const next = activeOptions[(currentIdx + 1) % activeOptions.length];
       actions.updateMcqItem(script.id, questionNumber, next);
       const nextBtn = e.currentTarget.parentElement?.querySelectorAll("button")[
-        (currentIdx + 1) % OPTIONS.length
+        (currentIdx + 1) % activeOptions.length
       ] as HTMLButtonElement | undefined;
       nextBtn?.focus();
     } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
       e.preventDefault();
-      const prevIdx = (currentIdx - 1 + OPTIONS.length) % OPTIONS.length;
-      const prev = OPTIONS[prevIdx];
+      const prevIdx = (currentIdx - 1 + activeOptions.length) % activeOptions.length;
+      const prev = activeOptions[prevIdx];
       actions.updateMcqItem(script.id, questionNumber, prev);
       const prevBtn = e.currentTarget.parentElement?.querySelectorAll("button")[prevIdx] as
         | HTMLButtonElement
@@ -371,7 +387,7 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
                             role="radiogroup"
                             aria-label={`Question ${item.questionNumber} selected option`}
                           >
-                            {OPTIONS.map((opt, optIdx) => {
+                            {activeOptions.map((opt, optIdx) => {
                               const active = item.selectedOption === opt;
                               return (
                                 <button
