@@ -1,5 +1,5 @@
 "use client";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { PageImage } from "@/components/PageImage";
 import { Alert, Badge, Button, Card, CardHeader } from "@/components/ui";
 import { imageToMaskedBase64 } from "@/lib/image-utils";
@@ -8,6 +8,17 @@ import { useStore } from "@/lib/store";
 import type { McqItem, Script } from "@/lib/types";
 
 const OPTIONS = ["A", "B", "C", "D", "E", "BLANK"] as const;
+const RANGE_SIZE = 10;
+
+type FilterMode = "ALL" | "NEEDS_REVIEW" | "EDITED";
+
+function needsReview(item: McqItem): boolean {
+  return (
+    item.selectedOption === "MULTIPLE" ||
+    item.selectedOption === "BLANK" ||
+    (typeof item.confidence === "number" && item.confidence < 0.8)
+  );
+}
 
 export function StudentMcqVerificationCard({ script }: { script: Script }) {
   const { actions } = useStore();
@@ -17,6 +28,41 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
   const [busy, setBusy] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
   const [activePageIdx, setActivePageIdx] = useState<number>(0);
+  const [filterMode, setFilterMode] = useState<FilterMode>("ALL");
+  const [activeRange, setActiveRange] = useState<string>("ALL");
+  const [compactGrid, setCompactGrid] = useState<boolean>(true);
+  const [zoomSheet, setZoomSheet] = useState<boolean>(false);
+
+  const items = extraction?.items ?? [];
+
+  const summary = useMemo(() => {
+    const flagged = items.filter(needsReview).length;
+    const edited = items.filter((i) => i.edited).length;
+    return { total: items.length, flagged, edited };
+  }, [items]);
+
+  const ranges = useMemo(() => {
+    if (items.length <= RANGE_SIZE) return [];
+    const maxQ = Math.max(...items.map((i) => i.questionNumber), items.length);
+    const groups: Array<{ key: string; label: string; start: number; end: number }> = [];
+    for (let start = 1; start <= maxQ; start += RANGE_SIZE) {
+      const end = Math.min(start + RANGE_SIZE - 1, maxQ);
+      groups.push({ key: `${start}-${end}`, label: `Q${start}–${end}`, start, end });
+    }
+    return groups;
+  }, [items]);
+
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      if (filterMode === "NEEDS_REVIEW" && !needsReview(item)) return false;
+      if (filterMode === "EDITED" && !item.edited) return false;
+      if (activeRange !== "ALL") {
+        const [s, e] = activeRange.split("-").map(Number);
+        if (item.questionNumber < s || item.questionNumber > e) return false;
+      }
+      return true;
+    });
+  }, [items, filterMode, activeRange]);
 
   if (pages.length === 0) return null;
 
@@ -61,6 +107,8 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
         verified: false,
         items: data.items,
       });
+      setFilterMode("ALL");
+      setActiveRange("ALL");
     } catch {
       setError("Could not reach the extraction service. Please try again.");
     } finally {
@@ -80,6 +128,31 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
         { questionNumber: nextNum, selectedOption: "A", confidence: "unknown", edited: true },
       ],
     });
+  }
+
+  function handleOptionKeyDown(
+    e: React.KeyboardEvent<HTMLButtonElement>,
+    questionNumber: number,
+    currentIdx: number,
+  ) {
+    if (e.key === "ArrowRight" || e.key === "ArrowDown") {
+      e.preventDefault();
+      const next = OPTIONS[(currentIdx + 1) % OPTIONS.length];
+      actions.updateMcqItem(script.id, questionNumber, next);
+      const nextBtn = e.currentTarget.parentElement?.querySelectorAll("button")[
+        (currentIdx + 1) % OPTIONS.length
+      ] as HTMLButtonElement | undefined;
+      nextBtn?.focus();
+    } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
+      e.preventDefault();
+      const prevIdx = (currentIdx - 1 + OPTIONS.length) % OPTIONS.length;
+      const prev = OPTIONS[prevIdx];
+      actions.updateMcqItem(script.id, questionNumber, prev);
+      const prevBtn = e.currentTarget.parentElement?.querySelectorAll("button")[prevIdx] as
+        | HTMLButtonElement
+        | undefined;
+      prevBtn?.focus();
+    }
   }
 
   return (
@@ -132,14 +205,21 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
             </div>
           </div>
         ) : (
-          <div className="grid gap-5 lg:grid-cols-12">
-            {/* Left: Uploaded MCQ Sheet Preview (Header Masked) */}
-            <div className="space-y-2.5 lg:col-span-5">
+          <div className="grid items-start gap-5 lg:grid-cols-12">
+            {/* Left: Sticky Uploaded MCQ Sheet Preview (stays visible while scrolling responses) */}
+            <div className="space-y-2.5 lg:sticky lg:top-4 lg:col-span-5">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-slate-700">Uploaded MCQ Sheet</span>
-                {pages.length > 1 && (
-                  <div className="flex items-center gap-1">
-                    {pages.map((p, idx) => (
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => setZoomSheet((z) => !z)}
+                    className="rounded border border-slate-200 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    {zoomSheet ? "Fit Width" : "Zoom Sheet"}
+                  </button>
+                  {pages.length > 1 &&
+                    pages.map((p, idx) => (
                       <button
                         key={p.id}
                         type="button"
@@ -153,83 +233,182 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
                         P{p.pageNumber}
                       </button>
                     ))}
-                  </div>
-                )}
+                </div>
               </div>
-              <div className="overflow-hidden rounded-xl border border-slate-200 bg-white p-2">
-                <PageImage image={activePage} showMask={true} />
+              <div
+                className={`rounded-xl border border-slate-200 bg-white p-2 ${
+                  zoomSheet ? "max-h-[540px] overflow-auto" : "overflow-hidden"
+                }`}
+              >
+                <div className={zoomSheet ? "w-[150%]" : "w-full"}>
+                  <PageImage image={activePage} showMask={true} />
+                </div>
               </div>
             </div>
 
-            {/* Right: Extracted MCQ Answer Grid */}
+            {/* Right: Compact, Accessible, Scroll-Bounded MCQ Verification Pane */}
             <div className="space-y-3 lg:col-span-7">
-              <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-slate-700">
-                  Extracted MCQ Responses ({extraction.items.length} questions)
-                </span>
-                <button
-                  type="button"
-                  onClick={addMcqRow}
-                  className="text-xs font-medium text-indigo-600 hover:underline"
-                >
-                  + Add question row
-                </button>
+              {/* Summary & Filter Controls */}
+              <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2">
+                <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter MCQ responses">
+                  <button
+                    type="button"
+                    onClick={() => setFilterMode("ALL")}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      filterMode === "ALL"
+                        ? "bg-slate-900 text-white"
+                        : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    All ({summary.total})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterMode("NEEDS_REVIEW")}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      filterMode === "NEEDS_REVIEW"
+                        ? "bg-amber-600 text-white"
+                        : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    Needs Review ({summary.flagged})
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFilterMode("EDITED")}
+                    className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                      filterMode === "EDITED"
+                        ? "bg-indigo-600 text-white"
+                        : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100"
+                    }`}
+                  >
+                    Edited ({summary.edited})
+                  </button>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setCompactGrid((v) => !v)}
+                    className="rounded-md border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    {compactGrid ? "Single Column" : "2-Column Grid"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={addMcqRow}
+                    className="text-xs font-medium text-indigo-600 hover:underline"
+                  >
+                    + Add row
+                  </button>
+                </div>
               </div>
 
-              {extraction.items.length === 0 ? (
-                <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
-                  No MCQ items were detected on this image. You can add rows manually or upload a clearer MCQ sheet.
+              {/* Section / Column Range Tabs (matches 10-question columns on OMR sheets) */}
+              {ranges.length > 0 && (
+                <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Question ranges">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeRange === "ALL"}
+                    onClick={() => setActiveRange("ALL")}
+                    className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                      activeRange === "ALL"
+                        ? "bg-indigo-600 text-white"
+                        : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    All Questions
+                  </button>
+                  {ranges.map((r) => (
+                    <button
+                      key={r.key}
+                      type="button"
+                      role="tab"
+                      aria-selected={activeRange === r.key}
+                      onClick={() => setActiveRange(r.key)}
+                      className={`rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${
+                        activeRange === r.key
+                          ? "bg-indigo-600 text-white"
+                          : "border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                      }`}
+                    >
+                      {r.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {/* Scroll-Bounded Answer Grid */}
+              {filteredItems.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500">
+                  {items.length === 0
+                    ? "No MCQ items were detected on this image. You can add rows manually or upload a clearer MCQ sheet."
+                    : "No questions match the selected filter."}
                 </div>
               ) : (
-                <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 bg-white">
-                  {extraction.items.map((item) => {
-                    const isLowConf = typeof item.confidence === "number" && item.confidence < 0.75;
+                <div
+                  className={`max-h-[520px] overflow-y-auto rounded-xl border border-slate-200 bg-white p-2 ${
+                    compactGrid ? "grid grid-cols-1 gap-1.5 xl:grid-cols-2" : "divide-y divide-slate-100"
+                  }`}
+                >
+                  {filteredItems.map((item) => {
+                    const flagged = needsReview(item);
                     const isMultiple = item.selectedOption === "MULTIPLE";
                     return (
                       <div
                         key={item.questionNumber}
-                        className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 text-xs"
+                        className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs ${
+                          compactGrid ? "border border-slate-100 bg-slate-50/40" : ""
+                        } ${flagged ? "ring-1 ring-amber-300 bg-amber-50/40" : ""}`}
                       >
-                        <div className="flex items-center gap-2.5">
-                          <span className="w-9 rounded bg-slate-100 px-2 py-1 text-center font-mono font-semibold text-slate-800">
+                        <div className="flex items-center gap-1.5">
+                          <span className="w-8 shrink-0 rounded bg-slate-100 py-0.5 text-center font-mono text-[11px] font-semibold text-slate-800">
                             Q{item.questionNumber}
                           </span>
-                          <div className="flex items-center gap-1">
-                            {OPTIONS.map((opt) => {
+                          <div
+                            className="flex items-center gap-0.5"
+                            role="radiogroup"
+                            aria-label={`Question ${item.questionNumber} selected option`}
+                          >
+                            {OPTIONS.map((opt, optIdx) => {
                               const active = item.selectedOption === opt;
                               return (
                                 <button
                                   key={opt}
                                   type="button"
+                                  role="radio"
+                                  aria-checked={active}
+                                  aria-label={`Question ${item.questionNumber} option ${opt === "BLANK" ? "Blank" : opt}`}
                                   onClick={() => actions.updateMcqItem(script.id, item.questionNumber, opt)}
-                                  className={`rounded-md px-2.5 py-1 font-mono text-xs font-semibold transition ${
+                                  onKeyDown={(e) => handleOptionKeyDown(e, item.questionNumber, optIdx)}
+                                  className={`rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                                     active
                                       ? opt === "BLANK"
                                         ? "bg-slate-700 text-white"
                                         : "bg-indigo-600 text-white shadow-xs"
-                                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
                                   }`}
                                 >
-                                  {opt === "BLANK" ? "Blank" : opt}
+                                  {opt === "BLANK" ? "—" : opt}
                                 </button>
                               );
                             })}
                           </div>
                         </div>
 
-                        <div className="flex items-center gap-2">
-                          {isMultiple && <Badge tone="red">Multiple marks detected</Badge>}
+                        <div className="flex shrink-0 items-center gap-1">
+                          {isMultiple && (
+                            <Badge tone="red" title="Multiple marks detected">
+                              Multi
+                            </Badge>
+                          )}
                           {item.edited && <Badge tone="indigo">Edited</Badge>}
-                          <Badge tone={isLowConf ? "amber" : "slate"}>
+                          <Badge tone={flagged ? "amber" : "slate"}>
                             {typeof item.confidence === "number"
-                              ? `${Math.round(item.confidence * 100)}% conf`
+                              ? `${Math.round(item.confidence * 100)}%`
                               : "Manual"}
                           </Badge>
-                          {item.note && (
-                            <span className="max-w-[180px] truncate text-[11px] text-amber-700" title={item.note}>
-                              {item.note}
-                            </span>
-                          )}
                         </div>
                       </div>
                     );
