@@ -76,13 +76,15 @@ export function StudentScriptUpload() {
   const [draftPaperType, setDraftPaperType] = useState<PaperType>(script?.paperType ?? "STRUCTURED");
   const [paperModalOpen, setPaperModalOpen] = useState<boolean>(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const initialPromptDone = useRef<boolean>(false);
 
   // Sync paperType when script loads or changes, and prompt on first visit if not chosen yet
   useEffect(() => {
     if (script?.paperType) {
       setPaperType(script.paperType);
       setDraftPaperType(script.paperType);
-    } else if (!paperType) {
+    } else if (!paperType && !initialPromptDone.current) {
+      initialPromptDone.current = true;
       setPaperModalOpen(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -92,6 +94,16 @@ export function StudentScriptUpload() {
     setPaperType(draftPaperType);
     if (script) {
       actions.setScriptPaperType(script.id, draftPaperType);
+    }
+    setPaperModalOpen(false);
+  }
+
+  function handleClosePaperModal() {
+    if (!paperType) {
+      setPaperType(draftPaperType);
+      if (script) {
+        actions.setScriptPaperType(script.id, draftPaperType);
+      }
     }
     setPaperModalOpen(false);
   }
@@ -564,16 +576,12 @@ export function StudentScriptUpload() {
       <Modal
         open={paperModalOpen}
         title="Select Question Paper Type"
-        onClose={() => {
-          if (paperType) setPaperModalOpen(false);
-        }}
+        onClose={handleClosePaperModal}
         footer={
           <div className="flex w-full items-center justify-end gap-2">
-            {paperType && (
-              <Button size="sm" onClick={() => setPaperModalOpen(false)}>
-                Cancel
-              </Button>
-            )}
+            <Button size="sm" onClick={handleClosePaperModal}>
+              Cancel
+            </Button>
             <Button size="sm" variant="primary" onClick={confirmPaperTypeSelection}>
               Confirm paper type
             </Button>
