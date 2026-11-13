@@ -1,8 +1,9 @@
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
-import { JWT_TTL_SECONDS, SESSION_COOKIE_NAME, signSessionJwt } from "@/lib/server-crypto";
-import { authenticateWithSupabase } from "@/lib/supabase-auth-store";
-import type { UserRole } from "@/lib/types";
+import type { SessionUser, UserRole } from "@/lib/types";
+
+const SESSION_COOKIE_NAME = "ese_session_jwt";
+const JWT_TTL_SECONDS = 60 * 60;
 
 export async function POST(req: Request) {
   try {
@@ -23,14 +24,30 @@ export async function POST(req: Request) {
       );
     }
 
-    const result = await authenticateWithSupabase(username, password, role);
-    if (!result.ok) {
-      return NextResponse.json({ ok: false, error: result.error }, { status: 401 });
+    const backendUrl = (process.env.BACKEND_URL || "http://127.0.0.1:8000").replace(/\/$/, "");
+    const backendRes = await fetch(`${backendUrl}/api/v1/auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ username, password, role }),
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const data = (await backendRes.json().catch(() => ({}))) as {
+      ok?: boolean;
+      user?: SessionUser;
+      token?: string;
+      error?: string;
+    };
+
+    if (!backendRes.ok || !data.ok || !data.user || !data.token) {
+      return NextResponse.json(
+        { ok: false, error: data.error || "Invalid username or password." },
+        { status: backendRes.status === 401 ? 401 : 502 },
+      );
     }
 
-    const token = signSessionJwt(result.user);
     const cookieStore = await cookies();
-    cookieStore.set(SESSION_COOKIE_NAME, token, {
+    cookieStore.set(SESSION_COOKIE_NAME, data.token, {
       httpOnly: true,
       secure: process.env.NODE_ENV === "production",
       sameSite: "lax",
@@ -38,12 +55,11 @@ export async function POST(req: Request) {
       maxAge: JWT_TTL_SECONDS,
     });
 
-    return NextResponse.json({ ok: true, user: result.user });
+    return NextResponse.json({ ok: true, user: data.user });
   } catch {
     return NextResponse.json(
-      { ok: false, error: "Authentication service error." },
-      { status: 500 },
+      { ok: false, error: "Could not reach the FastAPI backend on port 8000 for authentication." },
+      { status: 502 },
     );
   }
 }
-
