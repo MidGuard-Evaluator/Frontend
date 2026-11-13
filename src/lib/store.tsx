@@ -264,16 +264,55 @@ function makeActions(mutate: Ctx["mutate"], getState: () => State) {
       model: string,
       results: {
         questionId: string;
+        questionNumber?: string;
+        pageNumber?: number;
+        bbox?: Rect;
         rawText: string;
         blankDetected: boolean;
         spans: { id: string; lineNumber: number; text: string; confidence: number }[];
         flags: { type: FlagType; message: string; spanId?: string }[];
       }[],
+      replaceAllRegions = false,
     ) =>
       mutate((d) => {
         const s = d.scripts.find((x) => x.id === scriptId);
         if (!s) return;
         s.mappingConfirmed = true;
+        const orderedImgs = orderedImages(s);
+
+        if (replaceAllRegions) {
+          d.regions = d.regions.filter((r) => r.scriptId !== scriptId);
+          d.answers = d.answers.filter(
+            (a) => a.scriptId !== scriptId || a.versions.some((v) => v.approvalStatus === "APPROVED"),
+          );
+          results.forEach((res, idx) => {
+            const existsQ = d.assessment.questions.find((q) => q.id === res.questionId);
+            const label = res.questionNumber || `Q${idx + 1}`;
+            if (!existsQ) {
+              d.assessment.questions.push({
+                id: res.questionId,
+                number: label,
+                prompt: `Question ${idx + 1}`,
+                maxMarks: 4,
+              });
+            } else {
+              existsQ.number = label;
+            }
+            if (res.bbox && orderedImgs.length > 0) {
+              const pageIdx = Math.max(0, Math.min(orderedImgs.length - 1, (res.pageNumber ?? 1) - 1));
+              const targetImg = orderedImgs.find((im) => im.pageNumber === res.pageNumber) ?? orderedImgs[pageIdx];
+              d.regions.push({
+                id: uid("reg"),
+                scriptId,
+                imageId: targetImg.id,
+                questionId: res.questionId,
+                sequenceOrder: 1,
+                bbox: res.bbox,
+              });
+            }
+          });
+        }
+
         for (const res of results) {
           const regs = d.regions
             .filter((r) => r.scriptId === scriptId && r.questionId === res.questionId)

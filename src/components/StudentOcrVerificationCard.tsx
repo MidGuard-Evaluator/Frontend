@@ -5,7 +5,7 @@ import "react-image-crop/dist/ReactCrop.css";
 import { RegionCrop } from "@/components/PageImage";
 import { Alert, Badge, Button, Card, CardHeader, Modal } from "@/components/ui";
 import { activeVersion, orderedImages } from "@/lib/logic";
-import { cropRegionToBase64 } from "@/lib/image-utils";
+import { cropRegionToBase64, imageToMaskedBase64 } from "@/lib/image-utils";
 import { useStore } from "@/lib/store";
 import type { AnswerRegion, Question, Rect, Script, ScriptImage } from "@/lib/types";
 
@@ -78,37 +78,36 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
   }
 
   async function runAutoSegmentAndExtract() {
-    const items: { question: Question; page: ScriptImage; bbox: Rect }[] = [];
-    if (scriptRegions.length === 0 && pages.length > 0) {
-      const slots: { y: number; height: number }[] = [
-        { y: 16, height: 18 },
-        { y: 36, height: 18 },
-        { y: 56, height: 18 },
-        { y: 76, height: 18 },
-      ];
-      questions.forEach((q, idx) => {
-        const page = pages[Math.min(idx, pages.length - 1)] ?? pages[0];
-        const slot = slots[idx % slots.length];
-        const bbox: Rect = { x: 6, y: slot.y, width: 88, height: slot.height };
-        actions.addRegion(script.id, page.id, q.id, bbox);
-        items.push({ question: q, page, bbox });
-      });
-    } else {
-      for (const q of questions) {
-        const qRegs = scriptRegions
-          .filter((r) => r.questionId === q.id)
-          .sort((a, b) => a.sequenceOrder - b.sequenceOrder);
-        for (const r of qRegs) {
-          const page = pages.find((p) => p.id === r.imageId);
-          if (page) items.push({ question: q, page, bbox: r.bbox });
-        }
-      }
-    }
-    if (!script.pagesConfirmed) {
-      actions.confirmPages(script.id);
-    }
+    if (pages.length === 0) return;
+    setBusy(true);
+    setError(null);
     setConfirmedBanner(false);
-    await extractRegionsViaBackend(items);
+    try {
+      const pagePayloads = await Promise.all(
+        pages.map(async (p) => {
+          const { mimeType, base64Data } = await imageToMaskedBase64(p);
+          return { pageNumber: p.pageNumber, mimeType, base64Data };
+        }),
+      );
+      const res = await fetch("/api/ocr/structured", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pages: pagePayloads }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to extract handwritten OCR answers. Please retry.");
+        return;
+      }
+      if (!script.pagesConfirmed) {
+        actions.confirmPages(script.id);
+      }
+      actions.applyStructuredOcrResults(script.id, data.model || "vision-ocr", data.results || [], true);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to extract handwritten OCR answers.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function openRegionCropModal(q: Question) {
@@ -169,9 +168,21 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
     setConfirmedBanner(true);
   }
 
+  const mappedQuestionIds = new Set([
+    ...scriptRegions.map((r) => r.questionId),
+    ...scriptAnswers.map((a) => a.questionId),
+  ]);
+  const displayedQuestions =
+    mappedQuestionIds.size > 0
+      ? questions.filter((q) => mappedQuestionIds.has(q.id))
+      : questions;
+
   const allVerified =
-    scriptAnswers.length === questions.length &&
-    scriptAnswers.every((a) => {
+    displayedQuestions.length > 0 &&
+    scriptAnswers.length >= displayedQuestions.length &&
+    displayedQuestions.every((q) => {
+      const a = scriptAnswers.find((x) => x.questionId === q.id);
+      if (!a) return false;
       const v = activeVersion(a);
       return v?.approvalStatus === "APPROVED" || a.routingStatus === "NOT_ATTEMPTED" || a.routingStatus === "MANUAL_MARKING";
     });
@@ -224,7 +235,7 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
           </div>
         ) : (
           <div className="space-y-4">
-            {questions.map((q) => {
+            {displayedQuestions.map((q) => {
               const ans = scriptAnswers.find((a) => a.questionId === q.id);
               const ver = ans ? activeVersion(ans) : undefined;
               const qRegions: { region: AnswerRegion; image: ScriptImage }[] = scriptRegions
@@ -245,7 +256,6 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
                   <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 bg-slate-50/70 px-4 py-2.5">
                     <div className="flex items-center gap-2.5">
                       <span className="rounded bg-indigo-600 px-2 py-0.5 text-xs font-semibold text-white">{q.number}</span>
-                      <span className="text-xs font-medium text-slate-800">{q.prompt}</span>
                     </div>
 
                     <div className="flex flex-wrap items-center gap-2">
@@ -391,6 +401,30 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
                       ) : (
                         <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-500">
                           No text extracted yet.
+                        </div>
+                      )}
+
+                      {ver && ver.flags.filter((f) => !f.resolved).length > 0 && (
+                        <div className="space-y-1.5">
+                          {ver.flags
+                            .filter((f) => !f.resolved)
+                            .map((f) => (
+                              <div
+                                key={f.id}
+                                className="flex items-center justify-between gap-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-800"
+                              >
+                                <span>{f.message}</span>
+                                {ans && !isApproved && (
+                                  <button
+                                    type="button"
+                                    onClick={() => actions.resolveFlag(ans.id, f.id, "Checked by student.")}
+                                    className="shrink-0 font-semibold text-amber-900 underline"
+                                  >
+                                    Mark checked
+                                  </button>
+                                )}
+                              </div>
+                            ))}
                         </div>
                       )}
                     </div>
