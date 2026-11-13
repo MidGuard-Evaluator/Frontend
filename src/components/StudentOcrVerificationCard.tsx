@@ -5,6 +5,7 @@ import "react-image-crop/dist/ReactCrop.css";
 import { RegionCrop } from "@/components/PageImage";
 import { Alert, Badge, Button, Card, CardHeader, Modal } from "@/components/ui";
 import { activeVersion, orderedImages } from "@/lib/logic";
+import { cropRegionToBase64 } from "@/lib/image-utils";
 import { useStore } from "@/lib/store";
 import type { AnswerRegion, Question, Rect, Script, ScriptImage } from "@/lib/types";
 
@@ -22,6 +23,8 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
   const [crop, setCrop] = useState<Crop>(DEFAULT_Q_CROP);
   const [replaceExisting, setReplaceExisting] = useState<boolean>(true);
   const [confirmedBanner, setConfirmedBanner] = useState<boolean>(false);
+  const [busy, setBusy] = useState<boolean>(false);
+  const [error, setError] = useState<string | null>(null);
 
   if (pages.length === 0) return null;
 
@@ -34,7 +37,48 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
     };
   }
 
-  function runAutoSegmentAndExtract() {
+  async function extractRegionsViaBackend(
+    items: { question: Question; page: ScriptImage; bbox: Rect }[],
+  ): Promise<boolean> {
+    if (items.length === 0) return false;
+    setBusy(true);
+    setError(null);
+    try {
+      const regions = await Promise.all(
+        items.map(async (item) => {
+          const { mimeType, base64Data } = await cropRegionToBase64(item.page, item.bbox);
+          return {
+            questionId: item.question.id,
+            questionNumber: item.question.number,
+            questionPrompt: item.question.prompt,
+            pageNumber: item.page.pageNumber,
+            mimeType,
+            base64Data,
+          };
+        }),
+      );
+      const res = await fetch("/api/ocr/structured", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regions }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok || !data?.ok) {
+        setError(data?.error || "Unable to extract handwritten OCR answers. Please retry.");
+        return false;
+      }
+      actions.applyStructuredOcrResults(script.id, data.model || "vision-ocr", data.results || []);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unable to extract handwritten OCR answers.");
+      return false;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function runAutoSegmentAndExtract() {
+    const items: { question: Question; page: ScriptImage; bbox: Rect }[] = [];
     if (scriptRegions.length === 0 && pages.length > 0) {
       const slots: { y: number; height: number }[] = [
         { y: 16, height: 18 },
@@ -45,19 +89,26 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
       questions.forEach((q, idx) => {
         const page = pages[Math.min(idx, pages.length - 1)] ?? pages[0];
         const slot = slots[idx % slots.length];
-        actions.addRegion(script.id, page.id, q.id, {
-          x: 6,
-          y: slot.y,
-          width: 88,
-          height: slot.height,
-        });
+        const bbox: Rect = { x: 6, y: slot.y, width: 88, height: slot.height };
+        actions.addRegion(script.id, page.id, q.id, bbox);
+        items.push({ question: q, page, bbox });
       });
+    } else {
+      for (const q of questions) {
+        const qRegs = scriptRegions
+          .filter((r) => r.questionId === q.id)
+          .sort((a, b) => a.sequenceOrder - b.sequenceOrder);
+        for (const r of qRegs) {
+          const page = pages.find((p) => p.id === r.imageId);
+          if (page) items.push({ question: q, page, bbox: r.bbox });
+        }
+      }
     }
     if (!script.pagesConfirmed) {
       actions.confirmPages(script.id);
     }
-    actions.confirmMappingAndExtract(script.id);
     setConfirmedBanner(false);
+    await extractRegionsViaBackend(items);
   }
 
   function openRegionCropModal(q: Question) {
@@ -69,20 +120,39 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
     setReplaceExisting(existingRegs.length > 0);
   }
 
-  function saveQuestionRegion() {
+  async function saveQuestionRegion() {
     if (!mappingQuestion || !selectedPageId) return;
+    const targetQ = mappingQuestion;
+    const targetPage = pages.find((p) => p.id === selectedPageId) ?? pages[0];
+    const newBbox = toPercentRect(crop);
+
+    const existingForQ = scriptRegions
+      .filter((r) => r.questionId === targetQ.id)
+      .sort((a, b) => a.sequenceOrder - b.sequenceOrder);
+
+    let itemsForQ: { question: Question; page: ScriptImage; bbox: Rect }[];
     if (replaceExisting) {
-      const oldRegs = scriptRegions.filter((r) => r.questionId === mappingQuestion.id);
-      oldRegs.forEach((r) => actions.deleteRegion(r.id));
+      existingForQ.forEach((r) => actions.deleteRegion(r.id));
+      itemsForQ = [{ question: targetQ, page: targetPage, bbox: newBbox }];
+    } else {
+      itemsForQ = existingForQ
+        .map((r) => {
+          const page = pages.find((p) => p.id === r.imageId);
+          return page ? { question: targetQ, page, bbox: r.bbox } : null;
+        })
+        .filter((x): x is { question: Question; page: ScriptImage; bbox: Rect } => x !== null);
+      itemsForQ.push({ question: targetQ, page: targetPage, bbox: newBbox });
     }
-    actions.addRegion(script.id, selectedPageId, mappingQuestion.id, toPercentRect(crop));
-    actions.confirmMappingAndExtract(script.id);
+
+    actions.addRegion(script.id, selectedPageId, targetQ.id, newBbox);
     setMappingQuestion(null);
+    await extractRegionsViaBackend(itemsForQ);
   }
 
-  function confirmAllAndSendToEvaluation() {
+  async function confirmAllAndSendToEvaluation() {
     if (scriptAnswers.length === 0) {
-      runAutoSegmentAndExtract();
+      await runAutoSegmentAndExtract();
+      return;
     }
     state.answers
       .filter((a) => a.scriptId === script.id)
@@ -115,11 +185,11 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
         sub="Extract text from your uploaded script pages, verify or correct the OCR transcript against your handwriting, and send to evaluation."
         right={
           <div className="flex flex-wrap items-center gap-2">
-            <Button size="sm" onClick={runAutoSegmentAndExtract}>
-              {scriptAnswers.length === 0 ? "Extract OCR Answers" : "Re-run OCR Extraction"}
+            <Button size="sm" disabled={busy} onClick={() => void runAutoSegmentAndExtract()}>
+              {busy ? "Extracting..." : scriptAnswers.length === 0 ? "Extract OCR Answers" : "Re-run OCR Extraction"}
             </Button>
             {scriptAnswers.length > 0 && (
-              <Button size="sm" variant="primary" onClick={confirmAllAndSendToEvaluation}>
+              <Button size="sm" variant="primary" disabled={busy} onClick={() => void confirmAllAndSendToEvaluation()}>
                 {allVerified ? "Verified & Sent to Evaluation" : "Confirm All & Send to Evaluation"}
               </Button>
             )}
@@ -134,6 +204,12 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
           </Alert>
         )}
 
+        {error && (
+          <Alert tone="red" title="OCR extraction error">
+            {error}
+          </Alert>
+        )}
+
         {scriptAnswers.length === 0 ? (
           <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-6 py-8 text-center">
             <p className="text-sm font-medium text-slate-800">Ready to extract answers from your uploaded script</p>
@@ -141,8 +217,8 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
               Click <strong>Extract OCR Answers</strong> to segment your pages by question and inspect the extracted OCR text before submitting for grading.
             </p>
             <div className="mt-4">
-              <Button variant="primary" onClick={runAutoSegmentAndExtract}>
-                Extract OCR Answers
+              <Button variant="primary" disabled={busy} onClick={() => void runAutoSegmentAndExtract()}>
+                {busy ? "Extracting..." : "Extract OCR Answers"}
               </Button>
             </div>
           </div>
@@ -254,11 +330,15 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
                                 {qRegions.length > 1 && (
                                   <button
                                     type="button"
+                                    disabled={busy}
                                     onClick={() => {
                                       actions.deleteRegion(region.id);
-                                      actions.confirmMappingAndExtract(script.id);
+                                      const remaining = qRegions
+                                        .filter((x) => x.region.id !== region.id)
+                                        .map((x) => ({ question: q, page: x.image, bbox: x.region.bbox }));
+                                      void extractRegionsViaBackend(remaining);
                                     }}
-                                    className="text-rose-600 hover:underline"
+                                    className="text-rose-600 hover:underline disabled:opacity-50"
                                   >
                                     Remove part
                                   </button>
@@ -343,8 +423,8 @@ export function StudentOcrVerificationCard({ script }: { script: Script }) {
               <Button size="sm" onClick={() => setMappingQuestion(null)}>
                 Cancel
               </Button>
-              <Button size="sm" variant="primary" onClick={saveQuestionRegion}>
-                Save Crop &amp; Extract OCR
+              <Button size="sm" variant="primary" disabled={busy} onClick={() => void saveQuestionRegion()}>
+                {busy ? "Extracting..." : "Save Crop & Extract OCR"}
               </Button>
             </div>
           </div>

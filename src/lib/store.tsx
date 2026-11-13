@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { clearBlobs, createMaskedCopy, getBlob } from "./image-utils";
 import { activeVersion, extractAnswer, nowIso, orderedImages, uid, versionText } from "./logic";
 import { buildSeed } from "./seed";
-import type { AnswerRecord, McqExtraction, PaperType, Rect, ScriptImage, SessionUser, State, UploadFailure, UserRole } from "./types";
+import type { AnswerRecord, FlagType, McqExtraction, PaperType, Rect, ScriptImage, SessionUser, State, UploadFailure, UserRole } from "./types";
 
 const KEY = "m1-enterprise-state-v2";
 const ACTOR = "Dr. S. Silva";
@@ -257,6 +257,67 @@ function makeActions(mutate: Ctx["mutate"], getState: () => State) {
           });
         }
         audit(d, "EXTRACT", `Ran handwriting extraction for ${s.pseudonymousCode} (header-masked crops only)`);
+      }),
+
+    applyStructuredOcrResults: (
+      scriptId: string,
+      model: string,
+      results: {
+        questionId: string;
+        rawText: string;
+        blankDetected: boolean;
+        spans: { id: string; lineNumber: number; text: string; confidence: number }[];
+        flags: { type: FlagType; message: string; spanId?: string }[];
+      }[],
+    ) =>
+      mutate((d) => {
+        const s = d.scripts.find((x) => x.id === scriptId);
+        if (!s) return;
+        s.mappingConfirmed = true;
+        for (const res of results) {
+          const regs = d.regions
+            .filter((r) => r.scriptId === scriptId && r.questionId === res.questionId)
+            .sort((a, b) => a.sequenceOrder - b.sequenceOrder);
+          const existing = d.answers.find((a) => a.scriptId === scriptId && a.questionId === res.questionId);
+          if (existing && existing.versions.some((v) => v.approvalStatus === "APPROVED")) continue;
+          if (existing) d.answers = d.answers.filter((a) => a !== existing);
+          d.answers.push({
+            id: existing?.id ?? uid("ans"),
+            scriptId,
+            questionId: res.questionId,
+            regionIds: regs.map((r) => r.id),
+            blankDetected: res.blankDetected,
+            blankConfirmed: false,
+            activeVersion: 1,
+            routingStatus: "NEEDS_REVIEW",
+            versions: [
+              {
+                version: 1,
+                spans: res.spans.map((sp) => ({
+                  id: sp.id,
+                  line: sp.lineNumber,
+                  text: sp.text,
+                  confidence: sp.confidence,
+                  regionId: regs[0]?.id ?? res.questionId,
+                  edited: false,
+                })),
+                rawText: res.rawText,
+                extractionStatus: "EXTRACTED",
+                ocrEngine: model,
+                approvalStatus: "PENDING",
+                createdAt: nowIso(),
+                flags: res.flags.map((f) => ({
+                  id: uid("flag"),
+                  type: f.type,
+                  message: f.message,
+                  spanId: f.spanId,
+                  resolved: false,
+                })),
+              },
+            ],
+          });
+        }
+        audit(d, "EXTRACT", `Ran Vision OCR handwriting extraction (${model}) for ${s.pseudonymousCode}`);
       }),
 
     editSpan: (answerId: string, spanId: string, text: string) =>

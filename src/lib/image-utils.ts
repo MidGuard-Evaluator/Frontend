@@ -93,3 +93,27 @@ export async function clearBlobs() {
   });
 }
 
+/** Crops a normalized (0-100%) bounding box from a header-masked ScriptImage and returns base64 JPEG. */
+export async function cropRegionToBase64(
+  image: ScriptImage,
+  rect: Rect,
+): Promise<{ mimeType: string; base64Data: string }> {
+  const maskedSrc =
+    image.maskStatus === "MASKED" && image.maskRect
+      ? image.maskedUrl || (await createMaskedCopy(image.originalUrl, image.maskRect))
+      : image.originalUrl;
+  const img = await loadImage(maskedSrc);
+  const sx = Math.max(0, Math.floor((rect.x / 100) * img.naturalWidth));
+  const sy = Math.max(0, Math.floor((rect.y / 100) * img.naturalHeight));
+  const sw = Math.max(1, Math.min(img.naturalWidth - sx, Math.ceil((rect.width / 100) * img.naturalWidth)));
+  const sh = Math.max(1, Math.min(img.naturalHeight - sy, Math.ceil((rect.height / 100) * img.naturalHeight)));
+  const canvas = document.createElement("canvas");
+  canvas.width = sw;
+  canvas.height = sh;
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+  const dataUrl = canvas.toDataURL("image/jpeg", 0.95);
+  const [, base64Data = ""] = dataUrl.split(",", 2);
+  return { mimeType: "image/jpeg", base64Data };
+}
+
