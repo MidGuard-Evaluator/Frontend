@@ -371,9 +371,8 @@ export function StudentScriptUpload() {
               }
               inputRef.current?.click();
             }}
-            className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 text-center transition ${
-              drag ? "border-indigo-500 bg-indigo-50/60" : "border-slate-300 bg-slate-50/50 hover:border-indigo-400 hover:bg-slate-50"
-            }`}
+            className={`flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 text-center transition ${drag ? "border-indigo-500 bg-indigo-50/60" : "border-slate-300 bg-slate-50/50 hover:border-indigo-400 hover:bg-slate-50"
+              }`}
           >
             <input
               ref={inputRef}
@@ -485,13 +484,12 @@ export function StudentScriptUpload() {
                       setDraggedPageIndex(null);
                       setDragOverPageIndex(null);
                     }}
-                    className={`flex flex-col justify-between overflow-hidden rounded-xl border bg-slate-50/40 shadow-xs transition-all ${
-                      isDragging
+                    className={`flex flex-col justify-between overflow-hidden rounded-xl border bg-slate-50/40 shadow-xs transition-all ${isDragging
                         ? "opacity-40 scale-[0.98] border-indigo-400"
                         : isOver
-                        ? "border-indigo-500 ring-2 ring-indigo-400 bg-indigo-50/30"
-                        : "border-slate-200"
-                    }`}
+                          ? "border-indigo-500 ring-2 ring-indigo-400 bg-indigo-50/30"
+                          : "border-slate-200"
+                      }`}
                   >
                     {/* Card Header (Fixed Height with Drag Handle) */}
                     <div className="flex h-10 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3.5 text-xs">
@@ -600,16 +598,14 @@ export function StudentScriptUpload() {
                   key={opt.value}
                   type="button"
                   onClick={() => setDraftPaperType(opt.value)}
-                  className={`flex w-full items-start gap-3 rounded-xl border p-3.5 text-left transition ${
-                    selected
+                  className={`flex w-full items-start gap-3 rounded-xl border p-3.5 text-left transition ${selected
                       ? "border-indigo-600 bg-indigo-50/70 ring-1 ring-indigo-600"
                       : "border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50"
-                  }`}
+                    }`}
                 >
                   <span
-                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
-                      selected ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-300 bg-white"
-                    }`}
+                    className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${selected ? "border-indigo-600 bg-indigo-600 text-white" : "border-slate-300 bg-white"
+                      }`}
                   >
                     {selected && <span className="h-1.5 w-1.5 rounded-full bg-white" />}
                   </span>

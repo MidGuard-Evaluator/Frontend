@@ -103,6 +103,9 @@ function makeActions(mutate: Ctx["mutate"], getState: () => State) {
         if (!s?.mcqExtraction) return;
         const item = s.mcqExtraction.items.find((i) => i.questionNumber === questionNumber);
         if (item) {
+          if (item.markedOptions && item.markedOptions.length > 1 && !item.markedOptions.includes(selectedOption)) {
+            return;
+          }
           item.selectedOption = selectedOption;
           item.edited = true;
         }

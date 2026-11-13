@@ -47,6 +47,7 @@ export type McqOptionStyle = "ALPHA" | "NUMERIC";
 export type McqItem = {
   questionNumber: number;
   selectedOption: string; // "A"-"E" | "1"-"5" | "BLANK" | "MULTIPLE"
+  markedOptions?: string[];
   confidence: number | "unknown";
   note?: string;
   edited?: boolean;

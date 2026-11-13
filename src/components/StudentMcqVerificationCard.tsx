@@ -17,7 +17,7 @@ function needsReview(item: McqItem): boolean {
   return (
     item.selectedOption === "MULTIPLE" ||
     item.selectedOption === "BLANK" ||
-    (typeof item.confidence === "number" && item.confidence < 0.8)
+    Boolean(item.markedOptions && item.markedOptions.length > 1 && !item.edited)
   );
 }
 
@@ -49,7 +49,8 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
   const summary = useMemo(() => {
     const flagged = items.filter(needsReview).length;
     const edited = items.filter((i) => i.edited).length;
-    return { total: items.length, flagged, edited };
+    const unresolvedMultiples = items.filter((i) => i.selectedOption === "MULTIPLE").length;
+    return { total: items.length, flagged, edited, unresolvedMultiples };
   }, [items]);
 
   const ranges = useMemo(() => {
@@ -135,7 +136,7 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
     if (!extraction) return;
     const nextNum =
       extraction.items.length > 0 ? Math.max(...extraction.items.map((i) => i.questionNumber)) + 1 : 1;
-    const defaultOpt = activeOptions[0] ?? "A";
+    const defaultOpt = activeOptions[0] ?? "1";
     actions.setMcqExtraction(script.id, {
       ...extraction,
       verified: false,
@@ -148,26 +149,33 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
 
   function handleOptionKeyDown(
     e: React.KeyboardEvent<HTMLButtonElement>,
-    questionNumber: number,
-    currentIdx: number,
+    item: McqItem,
+    currentOpt: string,
   ) {
+    const hasMultiple = Boolean(item.markedOptions && item.markedOptions.length > 1);
+    const allowed = hasMultiple
+      ? activeOptions.filter((o) => item.markedOptions!.includes(o))
+      : activeOptions;
+    if (allowed.length === 0) return;
+
+    const currAllowedIdx = Math.max(0, allowed.indexOf(currentOpt));
+    let targetOpt: string | undefined;
+
     if (e.key === "ArrowRight" || e.key === "ArrowDown") {
       e.preventDefault();
-      const next = activeOptions[(currentIdx + 1) % activeOptions.length];
-      actions.updateMcqItem(script.id, questionNumber, next);
-      const nextBtn = e.currentTarget.parentElement?.querySelectorAll("button")[
-        (currentIdx + 1) % activeOptions.length
-      ] as HTMLButtonElement | undefined;
-      nextBtn?.focus();
+      targetOpt = allowed[(currAllowedIdx + 1) % allowed.length];
     } else if (e.key === "ArrowLeft" || e.key === "ArrowUp") {
       e.preventDefault();
-      const prevIdx = (currentIdx - 1 + activeOptions.length) % activeOptions.length;
-      const prev = activeOptions[prevIdx];
-      actions.updateMcqItem(script.id, questionNumber, prev);
-      const prevBtn = e.currentTarget.parentElement?.querySelectorAll("button")[prevIdx] as
+      targetOpt = allowed[(currAllowedIdx - 1 + allowed.length) % allowed.length];
+    }
+
+    if (targetOpt) {
+      actions.updateMcqItem(script.id, item.questionNumber, targetOpt);
+      const targetIdxInDom = activeOptions.indexOf(targetOpt);
+      const btn = e.currentTarget.parentElement?.querySelectorAll("button")[targetIdxInDom] as
         | HTMLButtonElement
         | undefined;
-      prevBtn?.focus();
+      btn?.focus();
     }
   }
 
@@ -186,7 +194,7 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
                 size="sm"
                 variant="primary"
                 onClick={() => actions.verifyMcqExtraction(script.id)}
-                disabled={busy}
+                disabled={busy || summary.unresolvedMultiples > 0}
               >
                 {extraction.verified ? "Verified & Sent to Evaluation" : "Confirm All & Send to Evaluation"}
               </Button>
@@ -202,6 +210,12 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
           </Alert>
         )}
 
+        {summary.unresolvedMultiples > 0 && (
+          <Alert tone="amber" title="Invalid multiple-answer marks detected">
+            Please resolve {summary.unresolvedMultiples} invalid question(s) marked with multiple options by selecting one of the marked choices before sending to evaluation.
+          </Alert>
+        )}
+
         {extraction?.verified && (
           <Alert tone="green" title="MCQ answers verified and sent to evaluation">
             All {extraction.items.length} multiple-choice responses for {script.pseudonymousCode} have been verified and queued for grading.
@@ -212,7 +226,7 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
           <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 px-6 py-8 text-center">
             <p className="text-sm font-medium text-slate-800">Ready to extract MCQ answers from your uploaded sheet</p>
             <p className="mt-1 text-xs text-slate-500">
-              Click below to automatically detect each question number and marked option (A–E) from your answer sheet.
+              Click below to automatically detect each question number and marked option from your answer sheet.
             </p>
             <div className="mt-4">
               <Button variant="primary" onClick={runMcqExtraction} disabled={busy}>
@@ -222,7 +236,7 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
           </div>
         ) : (
           <div className="grid items-start gap-5 lg:grid-cols-12">
-            {/* Left: Sticky Uploaded MCQ Sheet Preview (stays visible while scrolling responses) */}
+            {/* Left: Sticky Uploaded MCQ Sheet Preview */}
             <div className="space-y-2.5 lg:sticky lg:top-4 lg:col-span-5">
               <div className="flex items-center justify-between text-xs">
                 <span className="font-semibold text-slate-700">Uploaded MCQ Sheet</span>
@@ -264,7 +278,6 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
 
             {/* Right: Compact, Accessible, Scroll-Bounded MCQ Verification Pane */}
             <div className="space-y-3 lg:col-span-7">
-              {/* Summary & Filter Controls */}
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50/70 px-3 py-2">
                 <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label="Filter MCQ responses">
                   <button
@@ -320,7 +333,6 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
                 </div>
               </div>
 
-              {/* Section / Column Range Tabs (matches 10-question columns on OMR sheets) */}
               {ranges.length > 0 && (
                 <div className="flex flex-wrap items-center gap-1" role="tablist" aria-label="Question ranges">
                   <button
@@ -355,7 +367,6 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
                 </div>
               )}
 
-              {/* Scroll-Bounded Answer Grid */}
               {filteredItems.length === 0 ? (
                 <div className="rounded-xl border border-slate-200 bg-slate-50 p-6 text-center text-xs text-slate-500">
                   {items.length === 0
@@ -369,63 +380,91 @@ export function StudentMcqVerificationCard({ script }: { script: Script }) {
                   }`}
                 >
                   {filteredItems.map((item) => {
-                    const flagged = needsReview(item);
-                    const isMultiple = item.selectedOption === "MULTIPLE";
+                    const hasMultipleMarks = Array.isArray(item.markedOptions) && item.markedOptions.length > 1;
+                    const isUnresolvedMultiple = item.selectedOption === "MULTIPLE";
+                    const isBlank = item.selectedOption === "BLANK";
+
                     return (
                       <div
                         key={item.questionNumber}
-                        className={`flex items-center justify-between gap-2 rounded-lg px-2.5 py-1.5 text-xs ${
-                          compactGrid ? "border border-slate-100 bg-slate-50/40" : ""
-                        } ${flagged ? "ring-1 ring-amber-300 bg-amber-50/40" : ""}`}
+                        className={`flex flex-col gap-1.5 rounded-lg px-2.5 py-1.5 text-xs ${
+                          isUnresolvedMultiple
+                            ? "border border-rose-300 bg-rose-50/70"
+                            : hasMultipleMarks
+                              ? "border border-indigo-200 bg-indigo-50/40"
+                              : isBlank
+                                ? "border border-amber-300 bg-amber-50/40"
+                                : compactGrid
+                                  ? "border border-slate-100 bg-slate-50/40"
+                                  : ""
+                        }`}
                       >
-                        <div className="flex items-center gap-1.5">
-                          <span className="w-8 shrink-0 rounded bg-slate-100 py-0.5 text-center font-mono text-[11px] font-semibold text-slate-800">
-                            Q{item.questionNumber}
-                          </span>
-                          <div
-                            className="flex items-center gap-0.5"
-                            role="radiogroup"
-                            aria-label={`Question ${item.questionNumber} selected option`}
-                          >
-                            {activeOptions.map((opt, optIdx) => {
-                              const active = item.selectedOption === opt;
-                              return (
-                                <button
-                                  key={opt}
-                                  type="button"
-                                  role="radio"
-                                  aria-checked={active}
-                                  aria-label={`Question ${item.questionNumber} option ${opt === "BLANK" ? "Blank" : opt}`}
-                                  onClick={() => actions.updateMcqItem(script.id, item.questionNumber, opt)}
-                                  onKeyDown={(e) => handleOptionKeyDown(e, item.questionNumber, optIdx)}
-                                  className={`rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
-                                    active
-                                      ? opt === "BLANK"
-                                        ? "bg-slate-700 text-white"
-                                        : "bg-indigo-600 text-white shadow-xs"
-                                      : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
-                                  }`}
-                                >
-                                  {opt === "BLANK" ? "—" : opt}
-                                </button>
-                              );
-                            })}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-8 shrink-0 rounded bg-slate-100 py-0.5 text-center font-mono text-[11px] font-semibold text-slate-800">
+                              Q{item.questionNumber}
+                            </span>
+                            <div
+                              className="flex items-center gap-0.5"
+                              role="radiogroup"
+                              aria-label={`Question ${item.questionNumber} selected option`}
+                            >
+                              {activeOptions.map((opt) => {
+                                const active = item.selectedOption === opt;
+                                const isBlocked = hasMultipleMarks && !item.markedOptions!.includes(opt);
+                                const isCandidate = isUnresolvedMultiple && hasMultipleMarks && !isBlocked;
+                                return (
+                                  <button
+                                    key={opt}
+                                    type="button"
+                                    role="radio"
+                                    aria-checked={active}
+                                    aria-disabled={isBlocked}
+                                    disabled={isBlocked}
+                                    title={
+                                      isBlocked
+                                        ? "Blocked: this option was not marked on your answer sheet"
+                                        : isCandidate
+                                          ? `Marked on sheet — click to choose ${opt}`
+                                          : undefined
+                                    }
+                                    aria-label={`Question ${item.questionNumber} option ${opt === "BLANK" ? "Blank" : opt}${isBlocked ? " (blocked)" : ""}`}
+                                    onClick={() => actions.updateMcqItem(script.id, item.questionNumber, opt)}
+                                    onKeyDown={(e) => handleOptionKeyDown(e, item, opt)}
+                                    className={`rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                                      isBlocked
+                                        ? "cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-300 line-through opacity-50"
+                                        : active
+                                          ? opt === "BLANK"
+                                            ? "bg-slate-700 text-white"
+                                            : "bg-indigo-600 text-white shadow-xs"
+                                          : isCandidate
+                                            ? "border border-rose-400 bg-white text-rose-800 ring-1 ring-rose-300 hover:bg-rose-100"
+                                            : "border border-slate-200 bg-white text-slate-700 hover:bg-slate-100"
+                                    }`}
+                                  >
+                                    {opt === "BLANK" ? "—" : opt}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="flex shrink-0 items-center gap-1">
+                            {isUnresolvedMultiple && <Badge tone="red">Invalid: Multiple marks</Badge>}
+                            {!isUnresolvedMultiple && hasMultipleMarks && (
+                              <Badge tone="indigo">Resolved ({item.selectedOption})</Badge>
+                            )}
+                            {!hasMultipleMarks && item.edited && <Badge tone="indigo">Edited</Badge>}
+                            {isBlank && <Badge tone="amber">Blank</Badge>}
                           </div>
                         </div>
 
-                        <div className="flex shrink-0 items-center gap-1">
-                          {isMultiple && (
-                            <Badge tone="red" title="Multiple marks detected">
-                              Multi
-                            </Badge>
-                          )}
-                          {item.edited && <Badge tone="indigo">Edited</Badge>}
-                          <Badge tone={flagged ? "amber" : "slate"}>
-                            {typeof item.confidence === "number"
-                              ? `${Math.round(item.confidence * 100)}%`
-                              : "Manual"}
-                          </Badge>
-                        </div>
+                        {isUnresolvedMultiple && hasMultipleMarks && (
+                          <p className="pl-9 text-[11px] font-medium text-rose-700">
+                            Invalid mark: select one marked answer ({item.markedOptions!.join(" or ")}); others are blocked.
+                          </p>
+                        )}
                       </div>
                     );
                   })}
