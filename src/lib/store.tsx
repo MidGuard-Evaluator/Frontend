@@ -7,7 +7,7 @@ import { activeVersion, extractAnswer, nowIso, orderedImages, uid, versionText }
 import { buildSeed } from "./seed";
 import type { AnswerRecord, FlagType, McqExtraction, PaperType, Rect, ScriptImage, SessionUser, State, UploadFailure, UserRole } from "./types";
 
-const KEY = "m1-enterprise-state-v2";
+const KEY = "m1-enterprise-state-v3";
 const ACTOR = "Dr. S. Silva";
 
 type Ctx = {
@@ -41,6 +41,17 @@ function makeActions(mutate: Ctx["mutate"], getState: () => State) {
       await clearBlobs().catch(() => undefined);
       mutate((d) => Object.assign(d, buildSeed()));
     },
+
+    addQuestion: () =>
+      mutate((d) => {
+        const nextIdx = d.assessment.questions.length + 1;
+        d.assessment.questions.push({
+          id: `q${nextIdx}`,
+          number: `Q${nextIdx}`,
+          prompt: `Question ${nextIdx}`,
+          maxMarks: 4,
+        });
+      }),
 
     addUploads: (
       groups: { scriptId?: string; code: string; realStudentId?: string; paperType?: PaperType; images: ScriptImage[] }[],
@@ -572,6 +583,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
     (async () => {
       let s: State;
       try {
+        localStorage.removeItem("m1-enterprise-state-v2");
         const raw = localStorage.getItem(KEY);
         s = raw ? (JSON.parse(raw) as State) : buildSeed();
         if (s.assessment.course === "CS2042 Operating Systems") {

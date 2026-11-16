@@ -575,11 +575,6 @@ export default function ScriptWorkspacePage() {
               title={`Map answer regions — Page ${currentImg.pageNumber}`}
               right={
                 <div className="flex flex-wrap gap-2">
-                  {currentImg.sampleKey && (
-                    <Button size="sm" onClick={autoMapSampleRegions}>
-                      Auto-detect sample
-                    </Button>
-                  )}
                   <Button
                     size="sm"
                     disabled={ocrLoading || !allMasked}
@@ -641,7 +636,14 @@ export default function ScriptWorkspacePage() {
 
           <div className="space-y-4">
             <Card>
-              <CardHeader title="Assign region" />
+              <CardHeader
+                title="Assign region"
+                right={
+                  <Button size="sm" onClick={() => actions.addQuestion()}>
+                    + Add Q
+                  </Button>
+                }
+              />
               <div className="space-y-3 p-5">
                 <div className="grid grid-cols-2 gap-1.5">
                   {state.assessment.questions.map((q, i) => {

@@ -220,7 +220,6 @@ export default function UploadPage() {
               <div className="mt-1 text-xs text-slate-500">JPEG or PNG · ≤ 10 MB per image · ≤ 10 images per script · ≤ 100 scripts per assessment</div>
               <div className="mt-4 flex gap-2">
                 <Button variant="primary" onClick={() => input.current?.click()}>Browse files</Button>
-                <Button onClick={loadSampleBatch}>Load sample batch</Button>
               </div>
               <input
                 ref={input}

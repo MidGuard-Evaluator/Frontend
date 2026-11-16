@@ -1,12 +1,12 @@
 "use client";
 import Link from "next/link";
 import { StudentDashboard } from "@/components/StudentDashboard";
-import { Badge, Card, CardHeader, PageHeader, Stepper, fmtTime } from "@/components/ui";
+import { Badge, Button, Card, CardHeader, PageHeader, Stepper, fmtTime } from "@/components/ui";
 import { STAGES, orderedImages, scriptStage } from "@/lib/logic";
 import { useStore } from "@/lib/store";
 
 export default function Overview() {
-  const { state, user } = useStore();
+  const { state, user, actions } = useStore();
   if (user?.role === "STUDENT") {
     return <StudentDashboard />;
   }
@@ -60,49 +60,70 @@ export default function Overview() {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
-              {scripts.map((s) => {
-                const st = scriptStage(state, s);
-                const ans = answers.filter((a) => a.scriptId === s.id);
-                const approved = ans.filter((a) => a.routingStatus !== "NEEDS_REVIEW").length;
-                return (
-                  <tr key={s.id} className="hover:bg-slate-50/60">
-                    <td className="px-5 py-3">
-                      <div className="font-mono text-[13px] font-semibold">{s.pseudonymousCode}</div>
-                      <div className="text-[11px] text-slate-400">{fmtTime(s.uploadedAt)}</div>
-                    </td>
-                    <td className="px-3 py-3 text-xs text-slate-700">
-                      {orderedImages(s).length} pages
-                    </td>
-                    <td className="px-3 py-3">
-                      <Badge tone={s.batchStatus === "COMPLETE" ? "green" : "red"}>{s.batchStatus}</Badge>
-                    </td>
-                    <td className="px-3 py-3">
-                      <Stepper steps={STAGES} current={st} />
-                    </td>
-                    <td className="px-3 py-3 text-xs text-slate-600">{ans.length ? `${approved}/${ans.length}` : "—"}</td>
-                    <td className="px-3 py-3 text-right">
-                      <Link href={`/scripts/${s.id}`} className="text-xs font-medium text-indigo-600 hover:underline">
-                        Open →
-                      </Link>
-                    </td>
-                  </tr>
-                );
-              })}
+              {scripts.length === 0 ? (
+                <tr>
+                  <td colSpan={6} className="px-5 py-8 text-center text-xs text-slate-500">
+                    No scripts uploaded yet.
+                  </td>
+                </tr>
+              ) : (
+                scripts.map((s) => {
+                  const st = scriptStage(state, s);
+                  const ans = answers.filter((a) => a.scriptId === s.id);
+                  const approved = ans.filter((a) => a.routingStatus !== "NEEDS_REVIEW").length;
+                  return (
+                    <tr key={s.id} className="hover:bg-slate-50/60">
+                      <td className="px-5 py-3">
+                        <div className="font-mono text-[13px] font-semibold">{s.pseudonymousCode}</div>
+                        <div className="text-[11px] text-slate-400">{fmtTime(s.uploadedAt)}</div>
+                      </td>
+                      <td className="px-3 py-3 text-xs text-slate-700">
+                        {orderedImages(s).length} pages
+                      </td>
+                      <td className="px-3 py-3">
+                        <Badge tone={s.batchStatus === "COMPLETE" ? "green" : "red"}>{s.batchStatus}</Badge>
+                      </td>
+                      <td className="px-3 py-3">
+                        <Stepper steps={STAGES} current={st} />
+                      </td>
+                      <td className="px-3 py-3 text-xs text-slate-600">{ans.length ? `${approved}/${ans.length}` : "—"}</td>
+                      <td className="px-3 py-3 text-right">
+                        <Link href={`/scripts/${s.id}`} className="text-xs font-medium text-indigo-600 hover:underline">
+                          Open →
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </Card>
 
         <Card>
-          <CardHeader title="Questions" />
-          <ul className="divide-y divide-slate-100">
-            {assessment.questions.map((q) => (
-              <li key={q.id} className="flex gap-3 px-5 py-2.5 text-sm">
-                <span className="font-mono font-semibold text-indigo-600">{q.number}</span>
-                <span className="flex-1 text-slate-700">{q.prompt}</span>
-                <span className="text-xs text-slate-400">{q.maxMarks}m</span>
-              </li>
-            ))}
-          </ul>
+          <CardHeader
+            title="Questions"
+            right={
+              <Button size="sm" onClick={() => actions.addQuestion()}>
+                + Add question
+              </Button>
+            }
+          />
+          {assessment.questions.length === 0 ? (
+            <div className="px-5 py-8 text-center text-xs text-slate-500">
+              No questions added yet. Click &ldquo;+ Add question&rdquo; or run AI Auto-Segment on an uploaded script.
+            </div>
+          ) : (
+            <ul className="divide-y divide-slate-100">
+              {assessment.questions.map((q) => (
+                <li key={q.id} className="flex gap-3 px-5 py-2.5 text-sm">
+                  <span className="font-mono font-semibold text-indigo-600">{q.number}</span>
+                  <span className="flex-1 text-slate-700">{q.prompt}</span>
+                  <span className="text-xs text-slate-400">{q.maxMarks}m</span>
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
       </div>
     </div>
