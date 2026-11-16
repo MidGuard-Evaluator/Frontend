@@ -15,7 +15,6 @@ const TEACHER_NAV = [
 
 const STUDENT_NAV = [
   { href: "/", label: "My results", icon: "M9 12l2 2 4-4M7 3h10a2 2 0 012 2v14a2 2 0 01-2 2H7a2 2 0 01-2-2V5a2 2 0 012-2z" },
-  { href: "/my-script", label: "My script", icon: "M12 16V4m0 0l-4 4m4-4l4 4M4 20h16" },
 ];
 
 function Icon({ d }: { d: string }) {
@@ -38,7 +37,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isTeacher = user.role === "TEACHER";
   const navItems = isTeacher ? TEACHER_NAV : STUDENT_NAV;
   const pending = state.answers.filter((a) => a.routingStatus === "NEEDS_REVIEW").length;
-  const studentOnTeacherRoute = !isTeacher && path !== "/" && !path.startsWith("/my-script");
+  const studentOnTeacherRoute = !isTeacher && path !== "/";
 
   return (
     <div className="flex min-h-screen">

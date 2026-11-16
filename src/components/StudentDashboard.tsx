@@ -1,9 +1,8 @@
 "use client";
-import Link from "next/link";
 import { useState } from "react";
-import { PageImage, RegionCrop } from "@/components/PageImage";
-import { Badge, Button, Card, CardHeader, Modal, PageHeader, fmtTime } from "@/components/ui";
-import { activeVersion, orderedImages } from "@/lib/logic";
+import { RegionCrop } from "@/components/PageImage";
+import { Badge, Button, Card, CardHeader, Modal, PageHeader } from "@/components/ui";
+import { activeVersion } from "@/lib/logic";
 import { useStore } from "@/lib/store";
 import type { AnswerRegion, ScriptImage, StudentQuestionResult, TextSpan } from "@/lib/types";
 
@@ -88,89 +87,28 @@ export function StudentDashboard() {
           <div className="mt-1 text-base font-semibold text-slate-900">{user?.displayName}</div>
         </Card>
         <Card className="px-4 py-3.5">
-          <div className="text-xs text-slate-500">{myResults.length > 0 ? "Total mark" : "Submission status"}</div>
+          <div className="text-xs text-slate-500">Total mark</div>
           {myResults.length > 0 ? (
             <div className="mt-1 text-xl font-semibold text-emerald-600">
               {totalAwarded} <span className="text-sm font-normal text-slate-400">/ {totalMax}</span>
             </div>
-          ) : myScript && myScript.images.length > 0 ? (
-            <div className="mt-1 flex items-center gap-2">
-              <span className="font-mono text-sm font-semibold text-slate-900">{myScript.pseudonymousCode}</span>
-              <Badge tone="indigo">Awaiting evaluation</Badge>
-            </div>
           ) : (
-            <div className="mt-1 text-sm font-medium text-slate-500">Not submitted</div>
+            <div className="mt-1 text-sm font-medium text-slate-500">Pending release</div>
           )}
         </Card>
         <Card className="px-4 py-3.5">
-          <div className="text-xs text-slate-500">{myResults.length > 0 ? "Review requests" : "Uploaded pages"}</div>
-          {myResults.length > 0 ? (
-            <div className="mt-1 text-xl font-semibold text-slate-900">{myRequests.length}</div>
-          ) : (
-            <div className="mt-1 flex items-center gap-2">
-              <span className="text-base font-semibold text-slate-900">{myScript?.images.length ?? 0} / 10</span>
-              {myScript && myScript.images.length > 0 && (
-                <Badge tone={myScript.pagesConfirmed ? "green" : "amber"}>
-                  {myScript.pagesConfirmed ? "Order confirmed" : "Confirm order"}
-                </Badge>
-              )}
-            </div>
-          )}
+          <div className="text-xs text-slate-500">Review requests</div>
+          <div className="mt-1 text-xl font-semibold text-slate-900">{myRequests.length}</div>
         </Card>
       </div>
 
       {myResults.length === 0 ? (
-        myScript && myScript.images.length > 0 ? (
-          <Card>
-            <CardHeader
-              title="Submitted Script — Awaiting Grade Release"
-              sub={`Script ${myScript.pseudonymousCode} · Uploaded ${fmtTime(myScript.uploadedAt)} · Your marks and feedback will appear here once released by the examiner.`}
-            />
-            <div className="p-5">
-              <div className="grid grid-cols-1 items-stretch gap-5 sm:grid-cols-2 lg:grid-cols-3">
-                {orderedImages(myScript).map((img) => (
-                  <div
-                    key={img.id}
-                    className="flex flex-col justify-between overflow-hidden rounded-xl border border-slate-200 bg-slate-50/40 shadow-xs"
-                  >
-                    <div className="flex h-10 shrink-0 items-center justify-between border-b border-slate-200 bg-white px-3.5 text-xs">
-                      <span className="font-semibold text-slate-900">Page {img.pageNumber}</span>
-                      <Badge tone={img.maskStatus === "MASKED" ? "green" : img.maskStatus === "NO_HEADER" ? "slate" : "amber"}>
-                        {img.maskStatus === "MASKED" ? "Header masked" : img.maskStatus === "NO_HEADER" ? "No header" : "Mask pending"}
-                      </Badge>
-                    </div>
-                    <div className="p-3">
-                      <div className="flex h-48 w-full items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-900/5">
-                        <PageImage image={img} showMask={true} contain={true} className="h-full w-full" />
-                      </div>
-                    </div>
-                    <div className="flex h-10 shrink-0 items-center justify-between border-t border-slate-200 bg-white px-3.5 text-xs text-slate-500">
-                      <span className="min-w-0 flex-1 truncate font-mono text-[11px]" title={img.fileName}>
-                        {img.fileName}
-                      </span>
-                      <span className="shrink-0 text-[11px] text-slate-400">{img.fileFormat}</span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Card>
-        ) : (
-          <Card className="p-6 text-center">
-            <p className="text-sm font-medium text-slate-800">No released results yet</p>
-            <p className="mt-1 text-xs text-slate-500">
-              Upload your handwritten exam script pages (JPEG or PNG) in My Script so your paper can be processed and graded.
-            </p>
-            <div className="mt-4">
-              <Link
-                href="/my-script"
-                className="inline-flex items-center rounded-lg bg-indigo-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-indigo-700"
-              >
-                Go to My script
-              </Link>
-            </div>
-          </Card>
-        )
+        <Card className="p-6 text-center">
+          <p className="text-sm font-medium text-slate-800">No released results yet</p>
+          <p className="mt-1 text-xs text-slate-500">
+            Your examination marks and feedback will appear here once your teacher completes grading and releases the assessment results.
+          </p>
+        </Card>
       ) : (
         <div className="space-y-4">
           {myResults.map((res) => {
