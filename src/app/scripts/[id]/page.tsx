@@ -5,11 +5,11 @@ import { useEffect, useState } from "react";
 import ReactCrop, { type Crop, type PercentCrop } from "react-image-crop";
 import { PageImage, QUESTION_COLORS, RegionCrop } from "@/components/PageImage";
 import { Alert, Badge, Button, Card, CardHeader, MaskBadge, PageHeader } from "@/components/ui";
-import { formatBytes } from "@/lib/image-utils";
-import { orderedImages } from "@/lib/logic";
+import { cropRegionToBase64, formatBytes, imageToMaskedBase64 } from "@/lib/image-utils";
+import { nowIso, orderedImages } from "@/lib/logic";
 import { sampleBlocks } from "@/lib/mock-ocr";
 import { useStore } from "@/lib/store";
-import type { Rect } from "@/lib/types";
+import type { FlagType, McqItem, McqOptionStyle, Rect } from "@/lib/types";
 
 type Tab = "order" | "mask" | "map";
 
@@ -28,6 +28,9 @@ export default function ScriptWorkspacePage() {
   const [regionCrop, setRegionCrop] = useState<Crop>(DEFAULT_REGION_CROP);
   const [selectedQuestionId, setSelectedQuestionId] = useState<string>(state.assessment.questions[0]?.id ?? "q1");
   const [activeRegionId, setActiveRegionId] = useState<string | null>(null);
+  const [ocrLoading, setOcrLoading] = useState<boolean>(false);
+  const [ocrError, setOcrError] = useState<string>("");
+  const [optionStyle, setOptionStyle] = useState<McqOptionStyle>(script?.mcqExtraction?.optionStyle ?? "ALPHA");
 
   useEffect(() => {
     if (!script) return;
@@ -97,18 +100,205 @@ export default function ScriptWorkspacePage() {
 
   const qIndex = (qid: string) => Math.max(0, state.assessment.questions.findIndex((q) => q.id === qid));
   const qNum = (qid: string) => state.assessment.questions.find((q) => q.id === qid)?.number ?? qid;
+  const isMcq = script.paperType === "MCQ";
+
+  async function runAutoStructuredOcr() {
+    if (!script || !imgs.length) return;
+    setOcrLoading(true);
+    setOcrError("");
+    try {
+      const pagesPayload = await Promise.all(
+        imgs.map(async (im) => {
+          const { mimeType, base64Data } = await imageToMaskedBase64(im);
+          return {
+            pageNumber: im.pageNumber,
+            mimeType,
+            base64Data,
+          };
+        }),
+      );
+      const res = await fetch("/api/ocr/structured", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pages: pagesPayload }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        model?: string;
+        results?: {
+          questionId: string;
+          questionNumber?: string;
+          pageNumber?: number;
+          bbox?: Rect;
+          rawText: string;
+          blankDetected: boolean;
+          spans: { id: string; lineNumber: number; text: string; confidence: number }[];
+          flags: { type: FlagType; message: string; spanId?: string }[];
+        }[];
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.results) {
+        setOcrError(data.error || "Gemini Vision structured OCR failed.");
+        setOcrLoading(false);
+        return;
+      }
+      actions.applyStructuredOcrResults(script.id, data.model || "gemini-3-flash-preview", data.results, true);
+      setOcrLoading(false);
+      router.push(`/review?script=${script.id}`);
+    } catch (err) {
+      setOcrError(err instanceof Error ? err.message : "Failed to run structured OCR.");
+      setOcrLoading(false);
+    }
+  }
+
+  async function runMappedRegionsOcr() {
+    if (!script || scriptRegions.length === 0) return;
+    const allHaveSampleKeys = scriptRegions.every((r) => imgs.find((i) => i.id === r.imageId)?.sampleKey);
+    if (allHaveSampleKeys) {
+      actions.confirmMappingAndExtract(script.id);
+      router.push(`/review?script=${script.id}`);
+      return;
+    }
+
+    setOcrLoading(true);
+    setOcrError("");
+    try {
+      const regionsPayload = [];
+      for (const q of state.assessment.questions) {
+        const regs = scriptRegions
+          .filter((r) => r.questionId === q.id)
+          .sort((a, b) => a.sequenceOrder - b.sequenceOrder);
+        if (!regs.length) continue;
+        const firstReg = regs[0];
+        const im = imgs.find((i) => i.id === firstReg.imageId) ?? imgs[0];
+        const { mimeType, base64Data } = await cropRegionToBase64(im, firstReg.bbox);
+        regionsPayload.push({
+          questionId: q.id,
+          questionNumber: q.number,
+          pageNumber: im.pageNumber,
+          mimeType,
+          base64Data,
+        });
+      }
+
+      const res = await fetch("/api/ocr/structured", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ regions: regionsPayload }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        model?: string;
+        results?: {
+          questionId: string;
+          questionNumber?: string;
+          pageNumber?: number;
+          bbox?: Rect;
+          rawText: string;
+          blankDetected: boolean;
+          spans: { id: string; lineNumber: number; text: string; confidence: number }[];
+          flags: { type: FlagType; message: string; spanId?: string }[];
+        }[];
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.results) {
+        setOcrError(data.error || "Gemini Vision region OCR failed.");
+        setOcrLoading(false);
+        return;
+      }
+      actions.applyStructuredOcrResults(script.id, data.model || "gemini-3-flash-preview", data.results, false);
+      setOcrLoading(false);
+      router.push(`/review?script=${script.id}`);
+    } catch (err) {
+      setOcrError(err instanceof Error ? err.message : "Failed to extract mapped regions.");
+      setOcrLoading(false);
+    }
+  }
+
+  async function runMcqOcr() {
+    if (!script || !imgs.length) return;
+    setOcrLoading(true);
+    setOcrError("");
+    try {
+      const payloadImages = await Promise.all(
+        imgs.map(async (im) => {
+          const { mimeType, base64Data } = await imageToMaskedBase64(im);
+          return {
+            pageNumber: im.pageNumber,
+            mimeType,
+            base64Data,
+          };
+        }),
+      );
+      const res = await fetch("/api/ocr/mcq", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ images: payloadImages }),
+      });
+      const data = (await res.json()) as {
+        ok: boolean;
+        model?: string;
+        optionStyle?: McqOptionStyle;
+        optionLabels?: string[];
+        items?: McqItem[];
+        error?: string;
+      };
+      if (!res.ok || !data.ok || !data.items) {
+        setOcrError(data.error || "MCQ OMR extraction failed.");
+        setOcrLoading(false);
+        return;
+      }
+      if (data.optionStyle) setOptionStyle(data.optionStyle);
+      actions.setMcqExtraction(script.id, {
+        extractedAt: nowIso(),
+        model: data.model || "gemini-3-flash-preview",
+        optionStyle: data.optionStyle || optionStyle,
+        optionLabels: data.optionLabels || (optionStyle === "NUMERIC" ? ["1", "2", "3", "4", "5"] : ["A", "B", "C", "D"]),
+        verified: false,
+        items: data.items,
+      });
+    } catch (err) {
+      setOcrError(err instanceof Error ? err.message : "Failed to run MCQ OMR extraction.");
+    } finally {
+      setOcrLoading(false);
+    }
+  }
 
   return (
     <div className="space-y-5">
       <PageHeader
         title={`Script ${script.pseudonymousCode}`}
         right={
-          <Link
-            href={`/review?script=${script.id}`}
-            className="rounded-md bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700"
-          >
-            Review transcripts →
-          </Link>
+          <div className="flex flex-wrap items-center gap-2.5">
+            <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs">
+              <button
+                type="button"
+                onClick={() => actions.setScriptPaperType(script.id, "STRUCTURED")}
+                className={`rounded-md px-2.5 py-1 font-medium transition ${
+                  !isMcq ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                Handwritten / Essay
+              </button>
+              <button
+                type="button"
+                onClick={() => actions.setScriptPaperType(script.id, "MCQ")}
+                className={`rounded-md px-2.5 py-1 font-medium transition ${
+                  isMcq ? "bg-indigo-600 text-white" : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                MCQ Bubble Sheet
+              </button>
+            </div>
+            {!isMcq && (
+              <Link
+                href={`/review?script=${script.id}`}
+                className="rounded-md bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+              >
+                Review transcripts →
+              </Link>
+            )}
+          </div>
         }
       />
 
@@ -139,10 +329,14 @@ export default function ScriptWorkspacePage() {
             tab === "map" ? "bg-indigo-600 text-white" : "bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50"
           }`}
         >
-          <span>3. Map answers</span>
-          <Badge tone={script.mappingConfirmed ? "green" : "blue"}>{scriptRegions.length}</Badge>
+          <span>{isMcq ? "3. Extract & verify MCQ" : "3. Map & extract answers"}</span>
+          <Badge tone={script.mappingConfirmed ? "green" : "blue"}>
+            {isMcq ? (script.mcqExtraction?.items.length ?? 0) : scriptRegions.length}
+          </Badge>
         </button>
       </div>
+
+      {ocrError && <Alert tone="red" title="OCR Extraction Error">{ocrError}</Alert>}
 
       {tab === "order" && (
         <Card>
@@ -275,28 +469,131 @@ export default function ScriptWorkspacePage() {
         </div>
       )}
 
-      {tab === "map" && currentImg && (
+      {tab === "map" && currentImg && isMcq && (
+        <Card>
+          <CardHeader
+            title="MCQ Answer Sheet Extraction & Verification (Hybrid OMR + Gemini Vision)"
+            sub={
+              script.mcqExtraction
+                ? `Extracted ${script.mcqExtraction.items.length} question(s) via ${script.mcqExtraction.model}`
+                : "Run Hybrid OpenCV + Gemini Vision OMR on the header-masked script pages to detect shaded bubbles."
+            }
+            right={
+              <div className="flex items-center gap-2">
+                <Button variant="primary" size="sm" disabled={ocrLoading || !allMasked} onClick={runMcqOcr}>
+                  {ocrLoading ? "Running Hybrid OMR…" : script.mcqExtraction ? "Re-run OMR Extraction" : "Run Hybrid OMR Extraction"}
+                </Button>
+              </div>
+            }
+          />
+          <div className="space-y-4 p-5">
+            {!allMasked && (
+              <Alert tone="amber" title="Header masking required (M1-01)">
+                Please mask student-identifying headers on all pages in Step 2 before calling the external OMR / Vision model.
+              </Alert>
+            )}
+            {script.mcqExtraction && (
+              <>
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-[11px] text-slate-500">Total detected</div>
+                    <div className="mt-0.5 text-lg font-semibold text-slate-900">{script.mcqExtraction.items.length}</div>
+                  </div>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                    <div className="text-[11px] text-emerald-700">Answered</div>
+                    <div className="mt-0.5 text-lg font-semibold text-emerald-800">
+                      {script.mcqExtraction.items.filter((i) => i.selectedOption && i.selectedOption !== "BLANK" && i.selectedOption !== "MULTIPLE").length}
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                    <div className="text-[11px] text-amber-700">Flagged / Ambiguous</div>
+                    <div className="mt-0.5 text-lg font-semibold text-amber-800">
+                      {
+                        script.mcqExtraction.items.filter(
+                          (i) =>
+                            i.selectedOption === "BLANK" ||
+                            i.selectedOption === "MULTIPLE" ||
+                            (typeof i.confidence === "number" && i.confidence < 0.8),
+                        ).length
+                      }
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
+                  {script.mcqExtraction.items.map((item) => {
+                    const labels = script.mcqExtraction?.optionLabels ?? ["A", "B", "C", "D"];
+                    const isFlagged =
+                      item.selectedOption === "BLANK" ||
+                      item.selectedOption === "MULTIPLE" ||
+                      (typeof item.confidence === "number" && item.confidence < 0.8);
+                    return (
+                      <div
+                        key={item.questionNumber}
+                        className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${
+                          isFlagged ? "border-amber-300 bg-amber-50/50" : "border-slate-200 bg-white"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="w-7 font-mono font-semibold text-slate-800">Q{item.questionNumber}</span>
+                          {item.edited && <Badge tone="indigo">Edited</Badge>}
+                          {isFlagged && <Badge tone="amber">{item.selectedOption}</Badge>}
+                        </div>
+                        <div className="flex items-center gap-1">
+                          {labels.map((opt) => {
+                            const active = item.selectedOption === opt;
+                            return (
+                              <button
+                                key={opt}
+                                type="button"
+                                onClick={() => actions.updateMcqItem(script.id, item.questionNumber, opt)}
+                                className={`h-6 w-6 rounded-full font-mono text-[11px] font-semibold transition ${
+                                  active
+                                    ? "bg-indigo-600 text-white shadow-xs"
+                                    : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                                }`}
+                              >
+                                {opt}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        </Card>
+      )}
+
+      {tab === "map" && currentImg && !isMcq && (
         <div className="grid gap-6 xl:grid-cols-3">
           <Card className="xl:col-span-2">
             <CardHeader
               title={`Map answer regions — Page ${currentImg.pageNumber}`}
               right={
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   {currentImg.sampleKey && (
                     <Button size="sm" onClick={autoMapSampleRegions}>
-                      Auto-detect
+                      Auto-detect sample
                     </Button>
                   )}
                   <Button
+                    size="sm"
+                    disabled={ocrLoading || !allMasked}
+                    onClick={runAutoStructuredOcr}
+                  >
+                    {ocrLoading ? "Extracting with Gemini…" : "AI Auto-Segment & Extract All"}
+                  </Button>
+                  <Button
                     variant="primary"
                     size="sm"
-                    disabled={scriptRegions.length === 0}
-                    onClick={() => {
-                      actions.confirmMappingAndExtract(script.id);
-                      router.push(`/review?script=${script.id}`);
-                    }}
+                    disabled={scriptRegions.length === 0 || ocrLoading || !allMasked}
+                    onClick={runMappedRegionsOcr}
                   >
-                    Extract &amp; review →
+                    {ocrLoading ? "Extracting…" : "Extract & review →"}
                   </Button>
                 </div>
               }
