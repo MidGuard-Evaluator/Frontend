@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { Badge, Card, MaskBadge, PageHeader, Stepper } from "@/components/ui";
-import { STAGES, orderedImages, scriptStage } from "@/lib/logic";
+import { STAGES, orderedImages, scriptStage, scriptStatus } from "@/lib/logic";
 import { useStore } from "@/lib/store";
 
 export default function ScriptsPage() {
@@ -19,6 +19,7 @@ export default function ScriptsPage() {
       <div className="grid gap-5 md:grid-cols-2 2xl:grid-cols-3">
         {state.scripts.map((s) => {
           const st = scriptStage(state, s);
+          const status = scriptStatus(state, s);
           const imgs = orderedImages(s);
           const regions = state.regions.filter((r) => r.scriptId === s.id).length;
           return (
@@ -47,7 +48,7 @@ export default function ScriptsPage() {
                 <div className="space-y-2.5 px-4 py-3.5">
                   <div className="flex items-center justify-between">
                     <span className="font-mono text-sm font-semibold">{s.pseudonymousCode}</span>
-                    <Badge tone={s.batchStatus === "COMPLETE" ? "green" : "red"}>{s.batchStatus}</Badge>
+                    <Badge tone={status.tone}>{status.label}</Badge>
                   </div>
                   <Stepper steps={STAGES} current={st} />
                   <div className="flex items-center justify-between text-xs text-slate-500">

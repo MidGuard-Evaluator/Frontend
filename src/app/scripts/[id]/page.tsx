@@ -484,9 +484,23 @@ export default function ScriptWorkspacePage() {
                 : "Detect the shaded bubbles on the masked answer sheet, then verify them against the scan."
             }
             right={
-              <Button variant="primary" size="sm" disabled={ocrLoading || !allMasked} onClick={runMcqOcr}>
-                {ocrLoading ? "Extracting…" : script.mcqExtraction ? "Re-run extraction" : "Extract answers"}
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button variant="primary" size="sm" disabled={ocrLoading || !allMasked} onClick={runMcqOcr}>
+                  {ocrLoading ? "Extracting…" : script.mcqExtraction ? "Re-run extraction" : "Extract answers"}
+                </Button>
+                {script.mcqExtraction && (
+                  <Button
+                    variant={script.mcqExtraction.verified ? "secondary" : "success"}
+                    size="sm"
+                    onClick={() => {
+                      actions.verifyMcqExtraction(script.id);
+                      router.push("/");
+                    }}
+                  >
+                    {script.mcqExtraction.verified ? "Verified ✓" : "Approve & Complete →"}
+                  </Button>
+                )}
+              </div>
             }
           />
           <div className="space-y-4 p-5">
@@ -742,6 +756,32 @@ export default function ScriptWorkspacePage() {
                                 })}
                               </div>
                             )}
+
+                            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                              {script.mcqExtraction.verified ? (
+                                <div className="flex items-center gap-2 text-xs font-semibold text-emerald-700">
+                                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-100 text-emerald-800">
+                                    ✓
+                                  </span>
+                                  All MCQ answers verified and approved for evaluation.
+                                </div>
+                              ) : (
+                                <div className="flex w-full flex-wrap items-center justify-between gap-2">
+                                  <span className="text-xs text-slate-500">
+                                    Done checking answers? Approve this script to complete verification.
+                                  </span>
+                                  <Button
+                                    variant="success"
+                                    onClick={() => {
+                                      actions.verifyMcqExtraction(script.id);
+                                      router.push("/");
+                                    }}
+                                  >
+                                    Approve &amp; Complete Verification →
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
                           </>
                         )}
                       </>

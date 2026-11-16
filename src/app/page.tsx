@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { StudentDashboard } from "@/components/StudentDashboard";
 import { Badge, Button, Card, CardHeader, PageHeader, Stepper, fmtTime } from "@/components/ui";
-import { STAGES, orderedImages, scriptStage } from "@/lib/logic";
+import { STAGES, orderedImages, scriptStage, scriptStatus } from "@/lib/logic";
 import { useStore } from "@/lib/store";
 
 export default function Overview() {
@@ -13,10 +13,26 @@ export default function Overview() {
   const { answers, scripts, assessment } = state;
   const count = (f: (s: (typeof answers)[number]["routingStatus"]) => boolean) => answers.filter((a) => f(a.routingStatus)).length;
 
+  const awaitingReviewCount =
+    count((s) => s === "NEEDS_REVIEW") +
+    scripts.filter((s) => {
+      if (s.paperType !== "MCQ" || !s.mcqExtraction || s.mcqExtraction.verified) return false;
+      return s.mcqExtraction.items.some(
+        (i) =>
+          i.selectedOption === "BLANK" ||
+          i.selectedOption === "MULTIPLE" ||
+          (typeof i.confidence === "number" && i.confidence < 0.8),
+      );
+    }).length;
+
+  const approvedCount =
+    count((s) => s === "READY_FOR_AI") +
+    scripts.filter((s) => s.paperType === "MCQ" && s.mcqExtraction?.verified).length;
+
   const stats = [
     { label: "Scripts", value: `${scripts.length}`, tone: "text-slate-900" },
-    { label: "Awaiting review", value: `${count((s) => s === "NEEDS_REVIEW")}`, tone: "text-amber-600" },
-    { label: "Approved", value: `${count((s) => s === "READY_FOR_AI")}`, tone: "text-emerald-600" },
+    { label: "Awaiting review", value: `${awaitingReviewCount}`, tone: "text-amber-600" },
+    { label: "Approved", value: `${approvedCount}`, tone: "text-emerald-600" },
     { label: "Manual / skipped", value: `${count((s) => s === "MANUAL_MARKING" || s === "NOT_ATTEMPTED")}`, tone: "text-violet-600" },
   ];
 
@@ -69,8 +85,17 @@ export default function Overview() {
               ) : (
                 scripts.map((s) => {
                   const st = scriptStage(state, s);
+                  const status = scriptStatus(state, s);
                   const ans = answers.filter((a) => a.scriptId === s.id);
                   const approved = ans.filter((a) => a.routingStatus !== "NEEDS_REVIEW").length;
+                  const answersCol =
+                    s.paperType === "MCQ"
+                      ? s.mcqExtraction
+                        ? `${s.mcqExtraction.items.length} MCQs`
+                        : "—"
+                      : ans.length
+                        ? `${approved}/${ans.length}`
+                        : "—";
                   return (
                     <tr key={s.id} className="hover:bg-slate-50/60">
                       <td className="px-5 py-3">
@@ -81,12 +106,12 @@ export default function Overview() {
                         {orderedImages(s).length} pages
                       </td>
                       <td className="px-3 py-3">
-                        <Badge tone={s.batchStatus === "COMPLETE" ? "green" : "red"}>{s.batchStatus}</Badge>
+                        <Badge tone={status.tone}>{status.label}</Badge>
                       </td>
                       <td className="px-3 py-3">
                         <Stepper steps={STAGES} current={st} />
                       </td>
-                      <td className="px-3 py-3 text-xs text-slate-600">{ans.length ? `${approved}/${ans.length}` : "—"}</td>
+                      <td className="px-3 py-3 text-xs text-slate-600">{answersCol}</td>
                       <td className="px-3 py-3 text-right">
                         <Link href={`/scripts/${s.id}`} className="text-xs font-medium text-indigo-600 hover:underline">
                           Open →

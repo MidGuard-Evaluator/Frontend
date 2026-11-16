@@ -170,6 +170,14 @@ export function buildAnswerReady(state: State, a: AnswerRecord): AnswerReady | n
 export const STAGES = ["Uploaded", "Pages ordered", "Headers masked", "Answers mapped", "Extracted", "Transcripts approved"] as const;
 
 export function scriptStage(state: State, s: Script): number {
+  if (s.paperType === "MCQ") {
+    if (s.mcqExtraction?.verified) return 6;
+    if (s.mcqExtraction) return 5;
+    const allMasked = s.images.length > 0 && s.images.every((i) => i.maskStatus !== "PENDING");
+    if (allMasked && s.pagesConfirmed) return 3;
+    if (s.pagesConfirmed) return 2;
+    return 1;
+  }
   const answers = state.answers.filter((a) => a.scriptId === s.id);
   const allMasked = s.images.length > 0 && s.images.every((i) => i.maskStatus !== "PENDING");
   if (answers.length && answers.every((a) => a.routingStatus !== "NEEDS_REVIEW" && a.routingStatus !== "NOT_EXTRACTED")) return 6;
@@ -178,5 +186,60 @@ export function scriptStage(state: State, s: Script): number {
   if (allMasked && s.pagesConfirmed) return 3;
   if (s.pagesConfirmed) return 2;
   return 1;
+}
+
+export type ScriptStatusBadge = {
+  label: string;
+  tone: "green" | "amber" | "blue" | "slate" | "red" | "indigo";
+};
+
+export function scriptStatus(state: State, s: Script): ScriptStatusBadge {
+  if (s.batchStatus === "PARTIAL_FAILURE") {
+    return { label: "Upload issue", tone: "red" };
+  }
+
+  if (s.paperType === "MCQ") {
+    if (s.mcqExtraction?.verified) {
+      return { label: "Approved", tone: "green" };
+    }
+    if (s.mcqExtraction) {
+      const hasFlagged = s.mcqExtraction.items.some(
+        (i) =>
+          i.selectedOption === "BLANK" ||
+          i.selectedOption === "MULTIPLE" ||
+          (typeof i.confidence === "number" && i.confidence < 0.8),
+      );
+      if (hasFlagged) {
+        return { label: "Needs review", tone: "amber" };
+      }
+      return { label: "Extracted", tone: "blue" };
+    }
+    const allMasked = s.images.length > 0 && s.images.every((i) => i.maskStatus !== "PENDING");
+    if (allMasked && s.pagesConfirmed) return { label: "Masked", tone: "slate" };
+    if (s.pagesConfirmed) return { label: "Pages ordered", tone: "slate" };
+    return { label: "Uploaded", tone: "slate" };
+  }
+
+  // Structured / Essay
+  const answers = state.answers.filter((a) => a.scriptId === s.id);
+  if (
+    answers.length > 0 &&
+    answers.every((a) => a.routingStatus !== "NEEDS_REVIEW" && a.routingStatus !== "NOT_EXTRACTED")
+  ) {
+    return { label: "Approved", tone: "green" };
+  }
+  if (answers.length > 0 && answers.some((a) => a.routingStatus === "NEEDS_REVIEW")) {
+    return { label: "Needs review", tone: "amber" };
+  }
+  if (answers.length > 0) {
+    return { label: "Extracted", tone: "blue" };
+  }
+  if (s.mappingConfirmed) {
+    return { label: "Mapped", tone: "indigo" };
+  }
+  const allMasked = s.images.length > 0 && s.images.every((i) => i.maskStatus !== "PENDING");
+  if (allMasked && s.pagesConfirmed) return { label: "Masked", tone: "slate" };
+  if (s.pagesConfirmed) return { label: "Pages ordered", tone: "slate" };
+  return { label: "Uploaded", tone: "slate" };
 }
 
