@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
 import { Alert, Badge, Button, Card, CardHeader, PageHeader } from "@/components/ui";
@@ -217,7 +217,7 @@ export default function UploadPage() {
                 <path d="M12 16V4m0 0l-4 4m4-4l4 4M4 16v3a1 1 0 001 1h14a1 1 0 001-1v-3" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
               <div className="mt-3 text-sm font-semibold text-slate-800">Drag &amp; drop script images here</div>
-              <div className="mt-1 text-xs text-slate-500">JPEG or PNG · ≤ 10 MB per image · ≤ 10 images per script · ≤ 100 scripts per assessment</div>
+              <div className="mt-1 text-xs text-slate-500">JPEG or PNG Â· â‰¤ 10 MB per image Â· â‰¤ 10 images per script Â· â‰¤ 100 scripts per assessment</div>
               <div className="mt-4 flex gap-2">
                 <Button variant="primary" onClick={() => input.current?.click()}>Browse files</Button>
               </div>
@@ -272,10 +272,10 @@ export default function UploadPage() {
                       <span className="rounded bg-slate-900 px-2 py-0.5 font-mono text-xs font-semibold text-white">
                         {codeFor(key) || "pseudonym assigned on upload"}
                       </span>
-                      {mode === "prefix" && <span className="text-xs text-slate-400">grouped from filename prefix “{key}”</span>}
+                      {mode === "prefix" && <span className="text-xs text-slate-400">grouped from filename prefix â€œ{key}â€</span>}
                       {(mode === "prefix" || target === "new") && (
                         <label className="ml-auto flex items-center gap-2 text-xs text-slate-600">
-                          <span>🔒 Student ID (identity map)</span>
+                          <span>ðŸ”’ Student ID (identity map)</span>
                           <input
                             value={realIds[key] ?? ""}
                             onChange={(e) => setRealIds({ ...realIds, [key]: e.target.value })}
@@ -295,7 +295,7 @@ export default function UploadPage() {
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2">
                               <span className="truncate text-sm font-medium text-slate-800">{s.file.name}</span>
-                              <span className="text-[11px] text-slate-400">{formatBytes(s.file.size)} · {s.file.type || "unknown type"}</span>
+                              <span className="text-[11px] text-slate-400">{formatBytes(s.file.size)} Â· {s.file.type || "unknown type"}</span>
                             </div>
                             {s.state === "uploading" && (
                               <div className="mt-1.5 h-1.5 w-full overflow-hidden rounded bg-slate-200">
@@ -308,7 +308,7 @@ export default function UploadPage() {
                           {s.state === "failed" && <Badge tone="red">FAILED</Badge>}
                           {s.state === "staged" && (s.error ? <Badge tone="red">Invalid</Badge> : <Badge tone="blue">Valid</Badge>)}
                           {s.state === "staged" && !busy && (
-                            <Button size="sm" variant="ghost" aria-label={`Remove ${s.file.name}`} onClick={() => setStaged((p) => p.filter((x) => x.id !== s.id))}>✕</Button>
+                            <Button size="sm" variant="ghost" aria-label={`Remove ${s.file.name}`} onClick={() => setStaged((p) => p.filter((x) => x.id !== s.id))}>âœ•</Button>
                           )}
                         </li>
                       ))}
@@ -334,7 +334,7 @@ export default function UploadPage() {
                 }`}
               >
                 <div>Handwritten / Essay</div>
-                <div className="mt-0.5 text-[11px] font-normal text-slate-500">Region mapping &amp; Gemini OCR</div>
+                <div className="mt-0.5 text-[11px] font-normal text-slate-500">Written answers</div>
               </button>
               <button
                 type="button"
@@ -346,7 +346,7 @@ export default function UploadPage() {
                 }`}
               >
                 <div>MCQ Bubble Sheet</div>
-                <div className="mt-0.5 text-[11px] font-normal text-slate-500">Hybrid OpenCV + Vision OMR</div>
+                <div className="mt-0.5 text-[11px] font-normal text-slate-500">Shaded bubble answers</div>
               </button>
             </div>
           </Card>
@@ -358,7 +358,7 @@ export default function UploadPage() {
                 <input type="radio" checked={mode === "prefix"} onChange={() => setMode("prefix")} className="mt-1" />
                 <span>
                   <span className="font-medium">By filename prefix</span>
-                  <span className="block text-xs text-slate-500">e.g. studentA_p1.png, studentA_p2.png → one script</span>
+                  <span className="block text-xs text-slate-500">e.g. studentA_p1.png, studentA_p2.png â†’ one script</span>
                 </span>
               </label>
               <label className="flex items-start gap-2">
@@ -388,7 +388,7 @@ export default function UploadPage() {
                 <b>{validCount}</b> valid file(s) in <b>{groups.length}</b> script group(s)
               </div>
               <Button variant="primary" className="w-full" disabled={busy || staged.every((s) => s.state === "done")} onClick={upload}>
-                {busy ? "Uploading…" : "Upload batch"}
+                {busy ? "Uploadingâ€¦" : "Upload batch"}
               </Button>
             </div>
           </Card>
@@ -402,10 +402,10 @@ export default function UploadPage() {
                 {state.failures.slice(0, 8).map((f) => (
                   <li key={f.id} className="flex gap-2 px-5 py-2.5 text-xs">
                     <div className="flex-1">
-                      <div className="font-medium text-slate-800">{f.fileName} <span className="font-mono text-slate-400">→ {f.scriptCode}</span></div>
+                      <div className="font-medium text-slate-800">{f.fileName} <span className="font-mono text-slate-400">â†’ {f.scriptCode}</span></div>
                       <div className="text-rose-600">{f.reason}</div>
                     </div>
-                    <button className="text-slate-400 hover:text-slate-700" onClick={() => actions.dismissFailure(f.id)} aria-label="Dismiss">✕</button>
+                    <button className="text-slate-400 hover:text-slate-700" onClick={() => actions.dismissFailure(f.id)} aria-label="Dismiss">âœ•</button>
                   </li>
                 ))}
               </ul>

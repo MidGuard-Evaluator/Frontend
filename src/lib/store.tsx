@@ -108,11 +108,32 @@ function makeActions(mutate: Ctx["mutate"], getState: () => State) {
         );
       }),
 
-    updateMcqItem: (scriptId: string, questionNumber: number, selectedOption: string) =>
+    updateMcqItem: (scriptId: string, questionNumber: number, selectedOption: string, pageNumber?: number) =>
       mutate((d) => {
         const s = d.scripts.find((x) => x.id === scriptId);
         if (!s?.mcqExtraction) return;
-        const item = s.mcqExtraction.items.find((i) => i.questionNumber === questionNumber);
+
+        if (s.images.length > 1 && s.mcqExtraction.items.some((i) => i.pageNumber === undefined)) {
+          const perPage = Math.ceil(s.mcqExtraction.items.length / s.images.length);
+          s.mcqExtraction.items.forEach((it, idx) => {
+            if (it.pageNumber === undefined) {
+              const imgIdx = Math.min(s.images.length - 1, Math.floor(idx / perPage));
+              it.pageNumber = s.images[imgIdx]?.pageNumber ?? (imgIdx + 1);
+              if (imgIdx > 0 && it.questionNumber > perPage) {
+                it.questionNumber = it.questionNumber - imgIdx * perPage;
+              }
+            }
+          });
+        }
+
+        const item = s.mcqExtraction.items.find((i) => {
+          const matchQ = i.questionNumber === questionNumber;
+          if (!matchQ) return false;
+          if (pageNumber !== undefined && i.pageNumber !== undefined) {
+            return i.pageNumber === pageNumber;
+          }
+          return true;
+        });
         if (item) {
           if (item.markedOptions && item.markedOptions.length > 1 && !item.markedOptions.includes(selectedOption)) {
             return;

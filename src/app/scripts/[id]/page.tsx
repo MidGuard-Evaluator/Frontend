@@ -30,6 +30,9 @@ export default function ScriptWorkspacePage() {
   const [activeRegionId, setActiveRegionId] = useState<string | null>(null);
   const [ocrLoading, setOcrLoading] = useState<boolean>(false);
   const [ocrError, setOcrError] = useState<string>("");
+  const [mcqZoom, setMcqZoom] = useState<number>(1);
+  const [mcqSection, setMcqSection] = useState<number>(0);
+  const [mcqFlaggedOnly, setMcqFlaggedOnly] = useState<boolean>(false);
   const [optionStyle, setOptionStyle] = useState<McqOptionStyle>(script?.mcqExtraction?.optionStyle ?? "ALPHA");
 
   useEffect(() => {
@@ -138,7 +141,7 @@ export default function ScriptWorkspacePage() {
         error?: string;
       };
       if (!res.ok || !data.ok || !data.results) {
-        setOcrError(data.error || "Gemini Vision structured OCR failed.");
+        setOcrError(data.error || "Text extraction failed.");
         setOcrLoading(false);
         return;
       }
@@ -202,7 +205,7 @@ export default function ScriptWorkspacePage() {
         error?: string;
       };
       if (!res.ok || !data.ok || !data.results) {
-        setOcrError(data.error || "Gemini Vision region OCR failed.");
+        setOcrError(data.error || "Text extraction failed.");
         setOcrLoading(false);
         return;
       }
@@ -244,7 +247,7 @@ export default function ScriptWorkspacePage() {
         error?: string;
       };
       if (!res.ok || !data.ok || !data.items) {
-        setOcrError(data.error || "MCQ OMR extraction failed.");
+        setOcrError(data.error || "Answer extraction failed.");
         setOcrLoading(false);
         return;
       }
@@ -258,7 +261,7 @@ export default function ScriptWorkspacePage() {
         items: data.items,
       });
     } catch (err) {
-      setOcrError(err instanceof Error ? err.message : "Failed to run MCQ OMR extraction.");
+      setOcrError(err instanceof Error ? err.message : "Failed to extract answers.");
     } finally {
       setOcrLoading(false);
     }
@@ -336,7 +339,7 @@ export default function ScriptWorkspacePage() {
         </button>
       </div>
 
-      {ocrError && <Alert tone="red" title="OCR Extraction Error">{ocrError}</Alert>}
+      {ocrError && <Alert tone="red" title="Extraction error">{ocrError}</Alert>}
 
       {tab === "order" && (
         <Card>
@@ -472,98 +475,281 @@ export default function ScriptWorkspacePage() {
       {tab === "map" && currentImg && isMcq && (
         <Card>
           <CardHeader
-            title="MCQ Answer Sheet Extraction & Verification (Hybrid OMR + Gemini Vision)"
+            title="MCQ Answer Sheet Extraction & Verification"
             sub={
               script.mcqExtraction
-                ? `Extracted ${script.mcqExtraction.items.length} question(s) via ${script.mcqExtraction.model}`
-                : "Run Hybrid OpenCV + Gemini Vision OMR on the header-masked script pages to detect shaded bubbles."
+                ? imgs.length > 1
+                  ? `Page ${currentImg.pageNumber}: Showing questions for this sheet. Compare each answer with the scanned paper on the left.`
+                  : `${script.mcqExtraction.items.length} question(s) detected. Compare each answer with the scanned sheet on the left and correct any mistakes.`
+                : "Detect the shaded bubbles on the masked answer sheet, then verify them against the scan."
             }
             right={
-              <div className="flex items-center gap-2">
-                <Button variant="primary" size="sm" disabled={ocrLoading || !allMasked} onClick={runMcqOcr}>
-                  {ocrLoading ? "Running Hybrid OMR…" : script.mcqExtraction ? "Re-run OMR Extraction" : "Run Hybrid OMR Extraction"}
-                </Button>
-              </div>
+              <Button variant="primary" size="sm" disabled={ocrLoading || !allMasked} onClick={runMcqOcr}>
+                {ocrLoading ? "Extracting…" : script.mcqExtraction ? "Re-run extraction" : "Extract answers"}
+              </Button>
             }
           />
           <div className="space-y-4 p-5">
             {!allMasked && (
-              <Alert tone="amber" title="Header masking required (M1-01)">
-                Please mask student-identifying headers on all pages in Step 2 before calling the external OMR / Vision model.
+              <Alert tone="amber" title="Header masking required">
+                Please mask the student-identifying header on every page in Step 2 before extracting answers.
               </Alert>
             )}
-            {script.mcqExtraction && (
-              <>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-                    <div className="text-[11px] text-slate-500">Total detected</div>
-                    <div className="mt-0.5 text-lg font-semibold text-slate-900">{script.mcqExtraction.items.length}</div>
-                  </div>
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
-                    <div className="text-[11px] text-emerald-700">Answered</div>
-                    <div className="mt-0.5 text-lg font-semibold text-emerald-800">
-                      {script.mcqExtraction.items.filter((i) => i.selectedOption && i.selectedOption !== "BLANK" && i.selectedOption !== "MULTIPLE").length}
+
+            <div className="grid gap-5 lg:grid-cols-12">
+              {/* Left: scanned answer sheet */}
+              <div className="lg:col-span-6">
+                <div className="sticky top-20 space-y-3">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap gap-1.5">
+                      {imgs.map((im) => (
+                        <button
+                          key={im.id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedImageId(im.id);
+                            setMcqSection(0);
+                            setMcqFlaggedOnly(false);
+                          }}
+                          className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                            im.id === currentImg.id ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+                          }`}
+                        >
+                          Page {im.pageNumber}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <Button size="sm" onClick={() => setMcqZoom((z) => Math.max(1, Number((z - 0.25).toFixed(2))))}>
+                        −
+                      </Button>
+                      <span className="w-11 text-center font-mono text-xs">{Math.round(mcqZoom * 100)}%</span>
+                      <Button size="sm" onClick={() => setMcqZoom((z) => Math.min(3, Number((z + 0.25).toFixed(2))))}>
+                        +
+                      </Button>
                     </div>
                   </div>
-                  <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
-                    <div className="text-[11px] text-amber-700">Flagged / Ambiguous</div>
-                    <div className="mt-0.5 text-lg font-semibold text-amber-800">
-                      {
-                        script.mcqExtraction.items.filter(
-                          (i) =>
-                            i.selectedOption === "BLANK" ||
-                            i.selectedOption === "MULTIPLE" ||
-                            (typeof i.confidence === "number" && i.confidence < 0.8),
-                        ).length
-                      }
+                  <div className="max-h-[75vh] overflow-auto rounded-lg border border-slate-300 bg-slate-50">
+                    <div style={{ width: `${mcqZoom * 100}%` }}>
+                      <PageImage image={currentImg} showMask={true} />
                     </div>
                   </div>
                 </div>
+              </div>
 
-                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-4">
-                  {script.mcqExtraction.items.map((item) => {
-                    const labels = script.mcqExtraction?.optionLabels ?? ["A", "B", "C", "D"];
-                    const isFlagged =
-                      item.selectedOption === "BLANK" ||
-                      item.selectedOption === "MULTIPLE" ||
-                      (typeof item.confidence === "number" && item.confidence < 0.8);
+              {/* Right: extracted answers */}
+              <div className="space-y-4 lg:col-span-6">
+                {!script.mcqExtraction ? (
+                  <div className="flex h-full min-h-[240px] items-center justify-center rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-xs text-slate-500">
+                    No answers extracted yet. Click &ldquo;Extract answers&rdquo; to read the shaded bubbles from this sheet.
+                  </div>
+                ) : (
+                  (() => {
+                    const allRawItems = script.mcqExtraction.items;
+                    const totalImgs = Math.max(imgs.length, 1);
+                    const itemsPerPage = Math.ceil(allRawItems.length / totalImgs);
+
+                    // Normalize legacy items if pageNumber was not previously saved
+                    const normalizedItems = allRawItems.map((item, idx) => {
+                      if (item.pageNumber !== undefined) return item;
+                      const pageIdx = Math.min(imgs.length - 1, Math.floor(idx / itemsPerPage));
+                      const assignedPage = imgs[pageIdx]?.pageNumber ?? (pageIdx + 1);
+                      const qNum =
+                        pageIdx > 0 && item.questionNumber > itemsPerPage
+                          ? item.questionNumber - pageIdx * itemsPerPage
+                          : item.questionNumber;
+                      return { ...item, pageNumber: assignedPage, questionNumber: qNum };
+                    });
+
+                    // Strictly filter items belonging to the currently selected page
+                    const pageItems = normalizedItems
+                      .filter((i) => i.pageNumber === currentImg.pageNumber)
+                      .sort((a, b) => a.questionNumber - b.questionNumber);
+
+                    const flaggedOf = (i: McqItem) =>
+                      i.selectedOption === "BLANK" ||
+                      i.selectedOption === "MULTIPLE" ||
+                      (typeof i.confidence === "number" && i.confidence < 0.8);
+
+                    const answeredCount = pageItems.filter(
+                      (i) => i.selectedOption && i.selectedOption !== "BLANK" && i.selectedOption !== "MULTIPLE",
+                    ).length;
+                    const flaggedCount = pageItems.filter(flaggedOf).length;
+
+                    // Section chunking based strictly on the current page's questions
+                    const total = pageItems.length;
+                    const size = total <= 20 ? Math.max(total, 1) : total <= 60 ? 10 : 20;
+                    const sections: { label: string; items: McqItem[]; flagged: number }[] = [];
+                    for (let i = 0; i < total; i += size) {
+                      const chunk = pageItems.slice(i, i + size);
+                      sections.push({
+                        label: `${chunk[0].questionNumber}–${chunk[chunk.length - 1].questionNumber}`,
+                        items: chunk,
+                        flagged: chunk.filter(flaggedOf).length,
+                      });
+                    }
+                    const safeIdx = Math.min(mcqSection, Math.max(sections.length - 1, 0));
+                    const visible = mcqFlaggedOnly ? pageItems.filter(flaggedOf) : sections[safeIdx]?.items ?? [];
+
                     return (
-                      <div
-                        key={item.questionNumber}
-                        className={`flex items-center justify-between rounded-lg border px-3 py-2 text-xs ${
-                          isFlagged ? "border-amber-300 bg-amber-50/50" : "border-slate-200 bg-white"
-                        }`}
-                      >
-                        <div className="flex items-center gap-2">
-                          <span className="w-7 font-mono font-semibold text-slate-800">Q{item.questionNumber}</span>
-                          {item.edited && <Badge tone="indigo">Edited</Badge>}
-                          {isFlagged && <Badge tone="amber">{item.selectedOption}</Badge>}
+                      <>
+                        <div className="grid grid-cols-3 gap-3">
+                          <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                            <div className="text-[11px] text-slate-500">
+                              {imgs.length > 1 ? `Page ${currentImg.pageNumber} detected` : "Total detected"}
+                            </div>
+                            <div className="mt-0.5 text-lg font-semibold text-slate-900">{pageItems.length}</div>
+                          </div>
+                          <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
+                            <div className="text-[11px] text-emerald-700">Answered</div>
+                            <div className="mt-0.5 text-lg font-semibold text-emerald-800">{answeredCount}</div>
+                          </div>
+                          <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3">
+                            <div className="text-[11px] text-amber-700">Flagged</div>
+                            <div className="mt-0.5 text-lg font-semibold text-amber-800">{flaggedCount}</div>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-1">
-                          {labels.map((opt) => {
-                            const active = item.selectedOption === opt;
-                            return (
+
+                        {pageItems.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-xs text-slate-500">
+                            No questions detected for Page {currentImg.pageNumber}. Switch pages or re-run extraction.
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex flex-wrap items-center gap-2" role="group" aria-label="Question sections">
+                              {sections.length > 1 &&
+                                sections.map((sec, idx) => {
+                                  const active = !mcqFlaggedOnly && idx === safeIdx;
+                                  return (
+                                    <button
+                                      key={sec.label}
+                                      type="button"
+                                      aria-pressed={active}
+                                      onClick={() => {
+                                        setMcqFlaggedOnly(false);
+                                        setMcqSection(idx);
+                                      }}
+                                      className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                                        active
+                                          ? "border-indigo-600 bg-indigo-600 text-white"
+                                          : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                      }`}
+                                    >
+                                      Q{sec.label}
+                                      {sec.flagged > 0 && (
+                                        <span
+                                          className={`rounded-full px-1.5 text-[10px] ${
+                                            active ? "bg-white/25 text-white" : "bg-amber-100 text-amber-800"
+                                          }`}
+                                          aria-label={`${sec.flagged} flagged`}
+                                        >
+                                          {sec.flagged}
+                                        </span>
+                                      )}
+                                    </button>
+                                  );
+                                })}
                               <button
-                                key={opt}
                                 type="button"
-                                onClick={() => actions.updateMcqItem(script.id, item.questionNumber, opt)}
-                                className={`h-6 w-6 rounded-full font-mono text-[11px] font-semibold transition ${
-                                  active
-                                    ? "bg-indigo-600 text-white shadow-xs"
-                                    : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                                aria-pressed={mcqFlaggedOnly}
+                                onClick={() => setMcqFlaggedOnly((v) => !v)}
+                                className={`ml-auto rounded-lg border px-3 py-1.5 text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500 ${
+                                  mcqFlaggedOnly
+                                    ? "border-amber-500 bg-amber-500 text-white"
+                                    : "border-amber-200 bg-amber-50 text-amber-800 hover:bg-amber-100"
                                 }`}
                               >
-                                {opt}
+                                Flagged only ({flaggedCount})
                               </button>
-                            );
-                          })}
-                        </div>
-                      </div>
+                            </div>
+
+                            {sections.length > 1 && !mcqFlaggedOnly && (
+                              <div className="flex items-center justify-between text-xs text-slate-500">
+                                <Button size="sm" disabled={safeIdx === 0} onClick={() => setMcqSection(safeIdx - 1)}>
+                                  ← Previous
+                                </Button>
+                                <span>
+                                  Section {safeIdx + 1} of {sections.length}
+                                </span>
+                                <Button
+                                  size="sm"
+                                  disabled={safeIdx >= sections.length - 1}
+                                  onClick={() => setMcqSection(safeIdx + 1)}
+                                >
+                                  Next →
+                                </Button>
+                              </div>
+                            )}
+
+                            {visible.length === 0 ? (
+                              <div className="rounded-lg border border-dashed border-slate-300 bg-white p-6 text-center text-xs text-slate-500">
+                                No flagged answers on Page {currentImg.pageNumber}.
+                              </div>
+                            ) : (
+                              <div className="space-y-2">
+                                {visible.map((item) => {
+                                  const labels = script.mcqExtraction?.optionLabels ?? ["A", "B", "C", "D"];
+                                  const isFlagged =
+                                    item.selectedOption === "BLANK" ||
+                                    item.selectedOption === "MULTIPLE" ||
+                                    (typeof item.confidence === "number" && item.confidence < 0.8);
+                                  return (
+                                    <div
+                                      key={`${item.pageNumber ?? currentImg.pageNumber}-${item.questionNumber}`}
+                                      role="group"
+                                      aria-label={`Question ${item.questionNumber}`}
+                                      className={`flex items-center justify-between rounded-lg border px-4 py-2.5 text-sm ${
+                                        isFlagged ? "border-amber-300 bg-amber-50/50" : "border-slate-200 bg-white"
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2">
+                                        <span className="w-10 font-mono font-semibold text-slate-800">
+                                          Q{item.questionNumber}
+                                        </span>
+                                        {item.edited && <Badge tone="indigo">Edited</Badge>}
+                                        {isFlagged && <Badge tone="amber">{item.selectedOption}</Badge>}
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        {labels.map((opt) => {
+                                          const active = item.selectedOption === opt;
+                                          return (
+                                            <button
+                                              key={opt}
+                                              type="button"
+                                              aria-pressed={active}
+                                              aria-label={`Question ${item.questionNumber}, option ${opt}`}
+                                              onClick={() =>
+                                                actions.updateMcqItem(
+                                                  script.id,
+                                                  item.questionNumber,
+                                                  opt,
+                                                  currentImg.pageNumber,
+                                                )
+                                              }
+                                              className={`h-8 w-8 rounded-full font-mono text-xs font-semibold transition focus:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
+                                                active
+                                                  ? "bg-indigo-600 text-white shadow-xs"
+                                                  : "border border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100"
+                                              }`}
+                                            >
+                                              {opt}
+                                            </button>
+                                          );
+                                        })}
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </>
+                        )}
+                      </>
                     );
-                  })}
-                </div>
-              </>
-            )}
+                  })()
+                )}
+              </div>
+            </div>
           </div>
         </Card>
       )}
@@ -580,7 +766,7 @@ export default function ScriptWorkspacePage() {
                     disabled={ocrLoading || !allMasked}
                     onClick={runAutoStructuredOcr}
                   >
-                    {ocrLoading ? "Extracting with Gemini…" : "AI Auto-Segment & Extract All"}
+                    {ocrLoading ? "Extracting…" : "AI Auto-Segment & Extract All"}
                   </Button>
                   <Button
                     variant="primary"

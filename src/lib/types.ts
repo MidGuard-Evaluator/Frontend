@@ -45,6 +45,7 @@ export type PaperType = "STRUCTURED" | "MCQ";
 export type McqOptionStyle = "ALPHA" | "NUMERIC";
 
 export type McqItem = {
+  pageNumber?: number;
   questionNumber: number;
   selectedOption: string; // "A"-"E" | "1"-"5" | "BLANK" | "MULTIPLE"
   markedOptions?: string[];
